@@ -1,0 +1,11 @@
+{
+  "name": "Props Exporter (YAML/JSON)",
+  "id": "component-props-Exportor",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "dist/index.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  }
+}

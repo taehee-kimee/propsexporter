@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Props Exporter (YAML/JSON)</title>
+  <style>
+    /* Simple styles for the plugin UI */
+    * {
+      box-sizing: border-box;
+    }
+    
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-size: 12px;
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+    
+    /* Two column layout */
+    .left-panel {
+      width: 320px;
+      padding: 16px;
+      border-right: 1px solid #E5E5E5;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    
+    .right-panel {
+      flex: 1;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    
+    h2 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    
+    h3 {
+      margin: 0 0 8px 0;
+      font-size: 11px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    /* Mode switcher */
+    .mode-switcher {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 4px;
+      background-color: #F7F7F7;
+      border-radius: 6px;
+    }
+    
+    .mode-btn {
+      flex: 1;
+      padding: 6px 12px;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      background-color: transparent;
+      color: #666;
+      transition: all 0.2s;
+    }
+    
+    .mode-btn.active {
+      background-color: white;
+      color: #18A0FB;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .mode-btn:hover:not(.active) {
+      color: #333;
+    }
+    
+    /* Component list */
+    .component-list-container {
+      display: none;
+      margin-bottom: 16px;
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #E5E5E5;
+      border-radius: 4px;
+      background: white;
+    }
+    
+    .component-list-container.show {
+      display: block;
+    }
+    
+    .component-search {
+      padding: 8px;
+      border-bottom: 1px solid #E5E5E5;
+      position: sticky;
+      top: 0;
+      background: white;
+      z-index: 1;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    
+    .component-search input {
+      flex: 1;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: inherit;
+    }
+    
+    #refresh-btn {
+      padding: 6px 8px;
+      background: transparent;
+      border: 1px solid #E5E5E5;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    
+    #refresh-btn:hover {
+      background: #F7F7F7;
+      border-color: #18A0FB;
+    }
+    
+    #refresh-btn:active {
+      transform: rotate(180deg);
+    }
+    
+    .component-list {
+      padding: 4px;
+    }
+    
+    .component-item {
+      padding: 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background-color 0.15s;
+    }
+    
+    .component-item:hover {
+      background-color: #F7F7F7;
+    }
+    
+    .component-item.selected {
+      background-color: #E3F2FD;
+    }
+    
+    .component-item input[type="checkbox"] {
+      cursor: pointer;
+    }
+    
+    .component-item label {
+      cursor: pointer;
+      flex: 1;
+      margin: 0;
+      font-size: 11px;
+    }
+    
+    .component-type {
+      font-size: 9px;
+      color: #999;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      background: #F0F0F0;
+      border-radius: 3px;
+    }
+    
+    /* Exportion options */
+    .Exportion-options {
+      margin-bottom: 12px;
+      padding: 12px;
+      background-color: #F7F7F7;
+      border-radius: 4px;
+    }
+    
+    .checkbox-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+    }
+    
+    .checkbox-item input[type="checkbox"] {
+      margin-right: 6px;
+      cursor: pointer;
+    }
+    
+    .checkbox-item label {
+      margin: 0;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 400;
+      color: #333;
+    }
+    
+    /* Format selector */
+    .format-selector {
+      margin-bottom: 12px;
+    }
+    
+    .format-selector label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #666;
+    }
+    
+    select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: inherit;
+      background-color: white;
+      cursor: pointer;
+    }
+    
+    select:hover {
+      border-color: #18A0FB;
+    }
+    
+    /* Buttons */
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: auto;
+    }
+    
+    button {
+      flex: 1;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    #Export-btn {
+      background-color: #18A0FB;
+      color: white;
+    }
+    
+    #Export-btn:hover {
+      background-color: #0D8CE8;
+    }
+    
+    #copy-btn {
+      background-color: #2C2C2C;
+      color: white;
+    }
+    
+    #copy-btn:hover {
+      background-color: #1E1E1E;
+    }
+    
+    #copy-btn:disabled {
+      background-color: #E5E5E5;
+      color: #999;
+      cursor: not-allowed;
+    }
+    
+    /* Messages */
+    .error {
+      color: #F24822;
+      padding: 8px;
+      background-color: #FFF5F5;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      display: none;
+      font-size: 11px;
+    }
+    
+    .error.show {
+      display: block;
+    }
+    
+    .success-message {
+      color: #10B981;
+      padding: 8px;
+      background-color: #F0FDF4;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      display: none;
+      font-size: 11px;
+    }
+    
+    .success-message.show {
+      display: block;
+    }
+    
+    /* Result area */
+    #result-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    
+    #json-output {
+      width: 100%;
+      height: 100%;
+      padding: 12px;
+      border: 1px solid #E5E5E5;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 11px;
+      resize: none;
+      transition: border-color 0.3s ease;
+      background-color: #FAFAFA;
+    }
+    
+    #json-output.success {
+      border-color: #10B981;
+      border-width: 2px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Left Panel: Controls -->
+  <div class="left-panel">
+    <!-- Mode switcher -->
+    <div class="mode-switcher">
+      <button class="mode-btn active" id="selection-mode-btn">Selection</button>
+      <button class="mode-btn" id="browse-mode-btn">Browse</button>
+    </div>
+    
+    <!-- Component list (browse mode) -->
+    <div class="component-list-container" id="component-list-container">
+      <div class="component-search">
+        <input type="text" id="component-search-input" placeholder="Search components...">
+        <button id="refresh-btn" style="margin-top: 4px; width: 100%; padding: 4px 8px; font-size: 10px; background: #F0F0F0; border: 1px solid #E5E5E5; border-radius: 4px; cursor: pointer;">🔄 Refresh List</button>
+      </div>
+      <div class="component-list" id="component-list">
+        <div style="padding: 16px; text-align: center; color: #999; font-size: 11px;">
+          Click Browse to load components...
+        </div>
+      </div>
+    </div>
+    
+    <!-- Exportion options -->
+    <div class="Exportion-options">
+      <h3>Export Options</h3>
+      <div class="checkbox-group">
+        <div class="checkbox-item">
+          <input type="checkbox" id="Export-property" checked>
+          <label for="Export-property">Property</label>
+        </div>
+        <div class="checkbox-item">
+          <input type="checkbox" id="Export-anatomy" checked>
+          <label for="Export-anatomy">Anatomy</label>
+        </div>
+        <div class="checkbox-item">
+          <input type="checkbox" id="Export-element-styles" checked>
+          <label for="Export-element-styles">Element Styles</label>
+        </div>
+        <div class="checkbox-item">
+          <input type="checkbox" id="Export-figma-styles" checked>
+          <label for="Export-figma-styles">Figma Styles</label>
+        </div>
+        <div class="checkbox-item">
+          <input type="checkbox" id="Export-tokens" checked>
+          <label for="Export-tokens">Tokens</label>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Format selector -->
+    <div class="format-selector">
+      <label for="format-select">Output Format:</label>
+      <select id="format-select">
+        <option value="json">JSON</option>
+        <option value="yaml">YAML</option>
+        <option value="typescript">TypeScript Interface</option>
+        <option value="jsdoc">JSDoc</option>
+      </select>
+    </div>
+    
+    <!-- Action buttons -->
+    <div class="button-group">
+      <button id="Export-btn">Export</button>
+      <button id="copy-btn" disabled>Copy</button>
+    </div>
+  </div>
+  
+  <!-- Right Panel: Output -->
+  <div class="right-panel">
+    <!-- Error message area -->
+    <div id="error-message" class="error"></div>
+    
+    <!-- Success message area -->
+    <div id="success-message" class="success-message"></div>
+    
+    <!-- Result display area -->
+    <div id="result-container">
+      <textarea id="json-output" placeholder="Select a component and click 'Export' to see the output here..." readonly></textarea>
+    </div>
+  </div>
+  
+  <script>
+    // Get references to UI elements
+    const selectionModeBtn = document.getElementById('selection-mode-btn');
+    const browseModeBtn = document.getElementById('browse-mode-btn');
+    const componentListContainer = document.getElementById('component-list-container');
+    const componentList = document.getElementById('component-list');
+    const componentSearchInput = document.getElementById('component-search-input');
+    const refreshBtn = document.getElementById('refresh-btn');
+    const ExportBtn = document.getElementById('Export-btn');
+    const copyBtn = document.getElementById('copy-btn');
+    const jsonOutput = document.getElementById('json-output');
+    const errorMessage = document.getElementById('error-message');
+    const successMessage = document.getElementById('success-message');
+    const formatSelect = document.getElementById('format-select');
+    
+    // Store the current JSON data and components
+    let currentData = null;
+    let allComponents = [];
+    let selectedComponents = new Set();
+    let currentMode = 'selection'; // 'selection' or 'browse'
+    let componentsLoaded = false; // Track if components have been loaded
+    
+    // Mode switching
+    selectionModeBtn.onclick = () => {
+      currentMode = 'selection';
+      selectionModeBtn.classList.add('active');
+      browseModeBtn.classList.remove('active');
+      componentListContainer.classList.remove('show');
+      selectedComponents.clear();
+    };
+    
+    browseModeBtn.onclick = () => {
+      currentMode = 'browse';
+      browseModeBtn.classList.add('active');
+      selectionModeBtn.classList.remove('active');
+      componentListContainer.classList.add('show');
+      
+      // Load components if not already loaded
+      if (!componentsLoaded) {
+        loadComponents();
+      }
+    };
+    
+    // Refresh button
+    refreshBtn.onclick = () => {
+      loadComponents();
+    };
+    
+    // Load components from Figma
+    function loadComponents() {
+      componentList.innerHTML = '<div style="padding: 16px; text-align: center; color: #999; font-size: 11px;">Loading components...</div>';
+      parent.postMessage({ pluginMessage: { type: 'get-components' } }, '*');
+    }
+    
+    // Component search
+    componentSearchInput.oninput = (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      renderComponentList(searchTerm);
+    };
+    
+    // Render component list
+    function renderComponentList(searchTerm = '') {
+      const filtered = allComponents.filter(comp => 
+        comp.name.toLowerCase().includes(searchTerm)
+      );
+      
+      if (filtered.length === 0) {
+        componentList.innerHTML = '<div style="padding: 16px; text-align: center; color: #999; font-size: 11px;">No components found</div>';
+        return;
+      }
+      
+      componentList.innerHTML = filtered.map(comp => `
+        <div class="component-item ${selectedComponents.has(comp.id) ? 'selected' : ''}" data-id="${comp.id}">
+          <input type="checkbox" id="comp-${comp.id}" ${selectedComponents.has(comp.id) ? 'checked' : ''}>
+          <label for="comp-${comp.id}">${comp.name}</label>
+          <span class="component-type">${comp.type}</span>
+        </div>
+      `).join('');
+      
+      // Add click handlers
+      componentList.querySelectorAll('.component-item').forEach(item => {
+        const checkbox = item.querySelector('input[type="checkbox"]');
+        const id = item.dataset.id;
+        
+        item.onclick = (e) => {
+          if (e.target === checkbox) return; // Let checkbox handle its own click
+          
+          checkbox.checked = !checkbox.checked;
+          if (checkbox.checked) {
+            selectedComponents.add(id);
+            item.classList.add('selected');
+          } else {
+            selectedComponents.delete(id);
+            item.classList.remove('selected');
+          }
+        };
+        
+        checkbox.onchange = (e) => {
+          if (e.target.checked) {
+            selectedComponents.add(id);
+            item.classList.add('selected');
+          } else {
+            selectedComponents.delete(id);
+            item.classList.remove('selected');
+          }
+        };
+      });
+    }
+    
+    // When the "Export" button is clicked
+    ExportBtn.onclick = () => {
+      // Clear previous results and messages
+      clearMessages();
+      jsonOutput.value = '';
+      jsonOutput.classList.remove('success');
+      currentData = null;
+      copyBtn.disabled = true;
+      
+      // Get selected Exportion options
+      const options = {
+        property: document.getElementById('Export-property').checked,
+        anatomy: document.getElementById('Export-anatomy').checked,
+        elementStyles: document.getElementById('Export-element-styles').checked,
+        figmaStyles: document.getElementById('Export-figma-styles').checked,
+        tokens: document.getElementById('Export-tokens').checked
+      };
+      
+      // Check if at least one option is selected
+      if (!options.property && !options.anatomy && !options.elementStyles && !options.figmaStyles && !options.tokens) {
+        showError('Please select at least one Exportion option.');
+        return;
+      }
+      
+      if (currentMode === 'selection') {
+        // Selection mode: Export from current Figma selection
+        parent.postMessage({ pluginMessage: { type: 'Export-properties', options: options } }, '*');
+      } else {
+        // Browse mode: Export from selected components in list
+        if (selectedComponents.size === 0) {
+          showError('Please select at least one component from the list.');
+          return;
+        }
+        
+        parent.postMessage({ 
+          pluginMessage: { 
+            type: 'Export-multiple', 
+            componentIds: Array.from(selectedComponents),
+            options: options 
+          } 
+        }, '*');
+      }
+    };
+    
+    // When the "Copy JSON" button is clicked
+    copyBtn.onclick = () => {
+      if (currentData) {
+        try {
+          // Select the textarea content
+          jsonOutput.select();
+          jsonOutput.setSelectionRange(0, 99999); // For mobile devices
+          
+          // Copy the selected text
+          document.execCommand('copy');
+          
+          // Deselect
+          window.getSelection().removeAllRanges();
+          
+          // Show success by changing border color and displaying message
+          jsonOutput.classList.add('success');
+          showSuccess('Copy completed');
+          
+          // Remove success state after 2 seconds
+          setTimeout(() => {
+            jsonOutput.classList.remove('success');
+            clearMessages();
+          }, 2000);
+        } catch (err) {
+          // Show error if copy failed
+          showError('Failed to copy to clipboard.');
+        }
+      }
+    };
+    
+    // When format is changed, regenerate output
+    formatSelect.onchange = () => {
+      if (currentData) {
+        updateOutput();
+      }
+    };
+    
+    // Listen for messages from the plugin code
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      
+      if (msg.type === 'success') {
+        // Success: display the result
+        currentData = msg.data;
+        updateOutput();
+        copyBtn.disabled = false;
+        clearMessages();
+      } else if (msg.type === 'error') {
+        // Error: show error message
+        showError(msg.message);
+        currentData = null;
+        jsonOutput.value = '';
+        copyBtn.disabled = true;
+      } else if (msg.type === 'components-list') {
+        // Received component list
+        allComponents = msg.components;
+        componentsLoaded = true;
+        renderComponentList();
+      } else if (msg.type === 'components-changed') {
+        // Document changed, clear cache
+        if (currentMode === 'browse' && componentsLoaded) {
+          // Auto-refresh if in browse mode
+          loadComponents();
+        } else {
+          // Just mark as stale
+          componentsLoaded = false;
+        }
+      }
+    };
+    
+    /**
+     * Show error message in the UI
+     */
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorMessage.classList.add('show');
+      jsonOutput.classList.remove('success');
+    }
+    
+    /**
+     * Show success message in the UI
+     */
+    function showSuccess(message) {
+      successMessage.textContent = message;
+      successMessage.classList.add('show');
+      errorMessage.classList.remove('show');
+    }
+    
+    /**
+     * Clear all messages
+     */
+    function clearMessages() {
+      errorMessage.classList.remove('show');
+      successMessage.classList.remove('show');
+    }
+    
+    /**
+     * Update output based on selected format
+     */
+    function updateOutput() {
+      if (!currentData) return;
+      
+      const format = formatSelect.value;
+      let outputString = '';
+      
+      if (format === 'json') {
+        outputString = JSON.stringify(currentData, null, 2);
+      } else if (format === 'yaml') {
+        outputString = convertToYAML(currentData);
+      } else if (format === 'typescript') {
+        outputString = convertToTypeScript(currentData);
+      } else if (format === 'jsdoc') {
+        outputString = convertToJSDoc(currentData);
+      }
+      
+      jsonOutput.value = outputString;
+    }
+    
+    /**
+     * Convert data to YAML format
+     * YAML은 사람이 읽기 쉬운 데이터 직렬화 포맷으로,
+     * 설정 파일이나 데이터 교환에 널리 사용됩니다.
+     */
+    function convertToYAML(data, indent = 0) {
+      const indentStr = '  '.repeat(indent);
+      let result = '';
+      
+      for (const key in data) {
+        const value = data[key];
+        
+        if (value === null || value === undefined) {
+          result += `${indentStr}${key}: null\n`;
+        } else if (typeof value === 'object' && !Array.isArray(value)) {
+          result += `${indentStr}${key}:\n`;
+          result += convertToYAML(value, indent + 1);
+        } else if (Array.isArray(value)) {
+          result += `${indentStr}${key}:\n`;
+          value.forEach(item => {
+            if (typeof item === 'object') {
+              result += `${indentStr}  -\n`;
+              const itemYaml = convertToYAML(item, indent + 2);
+              result += itemYaml.split('\n').map(line => 
+                line ? `  ${line}` : line
+              ).join('\n');
+            } else {
+              result += `${indentStr}  - ${formatYAMLValue(item)}\n`;
+            }
+          });
+        } else {
+          result += `${indentStr}${key}: ${formatYAMLValue(value)}\n`;
+        }
+      }
+      
+      return result;
+    }
+    
+    /**
+     * Format YAML value based on type
+     */
+    function formatYAMLValue(value) {
+      if (typeof value === 'string') {
+        // Check if string needs quotes
+        if (value.includes(':') || value.includes('#') || value.includes('\n') || 
+            value.startsWith(' ') || value.endsWith(' ')) {
+          return `"${value.replace(/"/g, '\\"')}"`;
+        }
+        return value;
+      } else if (typeof value === 'boolean') {
+        return value ? 'true' : 'false';
+      } else if (typeof value === 'number') {
+        return value.toString();
+      }
+      return String(value);
+    }
+    
+    /**
+     * Convert data to TypeScript interface format
+     */
+    function convertToTypeScript(data) {
+      let result = '';
+      
+      for (const componentName in data) {
+        const component = data[componentName];
+        const props = component.props;
+        
+        result += `interface ${componentName}Props {\n`;
+        
+        for (const propName in props) {
+          const prop = props[propName];
+          let typeString = '';
+          
+          if (prop.type === 'boolean') {
+            typeString = 'boolean';
+          } else if (prop.type === 'string') {
+            typeString = 'string';
+          } else if (prop.type === 'enum') {
+            const values = prop.values.map(v => `'${v}'`).join(' | ');
+            typeString = values;
+          } else if (prop.type === 'instance') {
+            typeString = 'React.ReactNode';
+          }
+          
+          result += `  ${propName}: ${typeString};\n`;
+        }
+        
+        result += `}\n`;
+      }
+      
+      return result;
+    }
+    
+    /**
+     * Convert data to JSDoc format
+     */
+    function convertToJSDoc(data) {
+      let result = '';
+      
+      for (const componentName in data) {
+        const component = data[componentName];
+        const props = component.props;
+        
+        result += `/**\n`;
+        result += ` * @typedef {Object} ${componentName}Props\n`;
+        
+        for (const propName in props) {
+          const prop = props[propName];
+          let typeString = '';
+          
+          if (prop.type === 'boolean') {
+            typeString = 'boolean';
+          } else if (prop.type === 'string') {
+            typeString = 'string';
+          } else if (prop.type === 'enum') {
+            const values = prop.values.map(v => `'${v}'`).join('|');
+            typeString = `(${values})`;
+          } else if (prop.type === 'instance') {
+            typeString = 'ReactNode';
+          }
+          
+          result += ` * @property {${typeString}} ${propName}\n`;
+        }
+        
+        result += ` */\n`;
+      }
+      
+      return result;
+    }
+  </script>
+</body>
+</html>
