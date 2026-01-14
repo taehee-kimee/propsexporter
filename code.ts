@@ -4,6 +4,14 @@
 // Show the plugin UI window (larger size for two-column layout)
 figma.showUI(__html__, { width: 800, height: 600 });
 
+// Send loading state to UI
+figma.ui.postMessage({ type: 'loading', message: 'Loading components...' });
+
+// Load components in background
+(async () => {
+  await getAllComponents();
+})();
+
 // Send initial selection state
 function sendSelectionUpdate() {
   const selection = figma.currentPage.selection;
@@ -167,7 +175,7 @@ figma.on('documentchange', (event) => {
 });
 
 // Listen for messages from the UI
-figma.ui.onmessage = (msg) => {
+figma.ui.onmessage = async (msg) => {
   // When the UI asks to Export properties from current selection
   if (msg.type === 'Export-properties') {
     ExportComponentProperties(msg.options);
@@ -175,7 +183,14 @@ figma.ui.onmessage = (msg) => {
   
   // When the UI asks to get all components in the file
   if (msg.type === 'get-components') {
-    getAllComponents();
+    await getAllComponents(msg.forceRefresh || false);
+  }
+  
+  // When the UI asks to refresh components (clear cache)
+  if (msg.type === 'refresh-components') {
+    await figma.clientStorage.deleteAsync('componentsList');
+    await figma.clientStorage.deleteAsync('cacheTime');
+    await getAllComponents(true);
   }
   
   // When the UI asks to Export multiple components
@@ -748,57 +763,92 @@ function ExportTokens(node: ComponentNode | ComponentSetNode): any {
 }
 
 /**
- * Get all components and component sets in the current file
+ * Get all components and component sets in the current file with caching
  */
-function getAllComponents() {
-  const components: any[] = [];
-  
-  // Find all components in the document
-  function findComponents(node: BaseNode) {
-    // Only include ComponentSets and standalone Components (not variants)
-    if (node.type === 'COMPONENT_SET') {
-      // Check if published (has a component key) and not hidden (starts with .)
-      const compSet = node as ComponentSetNode;
-      if (compSet.key && !compSet.name.startsWith('.')) {
-        components.push({
-          id: node.id,
-          name: node.name,
-          type: 'COMPONENT_SET'
+async function getAllComponents(forceRefresh: boolean = false) {
+  try {
+    // Check cache first (unless force refresh)
+    if (!forceRefresh) {
+      const cached = await figma.clientStorage.getAsync('componentsList');
+      const cacheTime = await figma.clientStorage.getAsync('cacheTime');
+      
+      const now = Date.now();
+      const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+      
+      // If cache is valid, use it
+      if (cached && cacheTime && (now - cacheTime < CACHE_DURATION)) {
+        console.log('Using cached components');
+        figma.ui.postMessage({
+          type: 'components-list',
+          components: cached,
+          fromCache: true
         });
+        return;
       }
-    } else if (node.type === 'COMPONENT') {
-      // Only add if it's NOT a variant (not a child of ComponentSet)
-      if (!node.parent || node.parent.type !== 'COMPONENT_SET') {
-        const comp = node as ComponentNode;
+    }
+    
+    // Fetch fresh data
+    console.log('Fetching fresh components');
+    const components: any[] = [];
+    
+    // Find all components in the document
+    function findComponents(node: BaseNode) {
+      // Only include ComponentSets and standalone Components (not variants)
+      if (node.type === 'COMPONENT_SET') {
         // Check if published (has a component key) and not hidden (starts with .)
-        if (comp.key && !comp.name.startsWith('.')) {
+        const compSet = node as ComponentSetNode;
+        if (compSet.key && !compSet.name.startsWith('.')) {
           components.push({
             id: node.id,
             name: node.name,
-            type: 'COMPONENT'
+            type: 'COMPONENT_SET'
           });
+        }
+      } else if (node.type === 'COMPONENT') {
+        // Only add if it's NOT a variant (not a child of ComponentSet)
+        if (!node.parent || node.parent.type !== 'COMPONENT_SET') {
+          const comp = node as ComponentNode;
+          // Check if published (has a component key) and not hidden (starts with .)
+          if (comp.key && !comp.name.startsWith('.')) {
+            components.push({
+              id: node.id,
+              name: node.name,
+              type: 'COMPONENT'
+            });
+          }
+        }
+      }
+      
+      // Traverse children
+      if ('children' in node) {
+        for (const child of node.children) {
+          findComponents(child);
         }
       }
     }
     
-    // Traverse children
-    if ('children' in node) {
-      for (const child of node.children) {
-        findComponents(child);
-      }
+    // Search through all pages
+    for (const page of figma.root.children) {
+      findComponents(page);
     }
+    
+    // Save to cache
+    await figma.clientStorage.setAsync('componentsList', components);
+    await figma.clientStorage.setAsync('cacheTime', Date.now());
+    
+    // Send the list to UI
+    figma.ui.postMessage({
+      type: 'components-list',
+      components: components,
+      fromCache: false
+    });
+  } catch (error) {
+    console.error('Error getting components:', error);
+    figma.ui.postMessage({
+      type: 'error',
+      message: 'Failed to load components'
+    });
   }
-  
-  // Search through all pages
-  for (const page of figma.root.children) {
-    findComponents(page);
-  }
-  
-  // Send the list to UI
-  figma.ui.postMessage({
-    type: 'components-list',
-    components: components
-  });
 }
 
 /**

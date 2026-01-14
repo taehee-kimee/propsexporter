@@ -52,6 +52,8 @@ export default function App() {
   const [selection, setSelection] = useState<{name: string, type: string, properties?: Record<string, string>} | null>(null);
   const [components, setComponents] = useState<Array<{id: string, name: string, type: string}>>([]);
   const [ExportedData, setExportedData] = useState<any>(null);
+  const [isLoadingComponents, setIsLoadingComponents] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
   
   // Options State
   const [options, setOptions] = useState({
@@ -77,8 +79,14 @@ export default function App() {
       const msg = event.data.pluginMessage;
       if (!msg) return;
       
+      if (msg.type === 'loading') {
+        setIsLoadingComponents(true);
+      }
+      
       if (msg.type === 'components-list') {
         setComponents(msg.components);
+        setIsLoadingComponents(false);
+        setFromCache(msg.fromCache || false);
       }
       
       if (msg.type === 'Exportion-result') {
@@ -209,6 +217,12 @@ export default function App() {
       toast.error("Failed to copy");
     }
   };
+  
+  const handleRefreshComponents = () => {
+    setIsLoadingComponents(true);
+    setFromCache(false);
+    parent.postMessage({ pluginMessage: { type: 'refresh-components' } }, '*');
+  };
 
   return (
     <div className="flex h-screen w-full bg-white text-slate-900 font-sans overflow-hidden">
@@ -272,39 +286,59 @@ export default function App() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
+                  {fromCache && !isLoadingComponents && (
+                    <div className="flex items-center justify-between gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded-md">
+                      <p className="text-xs text-yellow-700 flex-1">Showing cached data</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-xs gap-1 text-yellow-700 hover:text-yellow-800 hover:bg-yellow-100"
+                        onClick={handleRefreshComponents}
+                      >
+                        <RefreshCcw className="w-3 h-3" /> Refresh
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 
                 <div className="flex-1 min-h-0 overflow-hidden px-4">
-                  <ScrollArea className="h-full">
-                    <div className="pb-4 space-y-1 pr-2">
-                      {filteredComponents.length > 0 ? (
-                        filteredComponents.map(comp => (
-                          <div 
-                            key={comp.id}
-                            className={`flex items-center gap-2 p-2 rounded-md transition-colors cursor-pointer border ${
-                              selectedComponentIds.has(comp.id) 
-                                ? 'bg-blue-50 border-blue-200' 
-                                : 'hover:bg-slate-100 border-transparent'
-                            }`}
-                            onClick={() => toggleComponentSelection(comp.id)}
-                          >
-                            <Checkbox 
-                              checked={selectedComponentIds.has(comp.id)}
-                              onCheckedChange={() => toggleComponentSelection(comp.id)}
-                              className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 shrink-0"
-                            />
-                            <div className="flex-1 min-w-0 overflow-hidden">
-                              <p className="text-sm font-medium truncate text-slate-700">{comp.name}</p>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-center py-8 text-xs text-slate-400">
-                          No components found
-                        </div>
-                      )}
+                  {isLoadingComponents ? (
+                    <div className="h-full flex flex-col items-center justify-center">
+                      <RefreshCcw className="w-8 h-8 text-slate-400 animate-spin mb-3" />
+                      <p className="text-sm text-slate-500">Loading components...</p>
                     </div>
-                  </ScrollArea>
+                  ) : (
+                    <ScrollArea className="h-full">
+                      <div className="pb-4 space-y-1 pr-2">
+                        {filteredComponents.length > 0 ? (
+                          filteredComponents.map(comp => (
+                            <div 
+                              key={comp.id}
+                              className={`flex items-center gap-2 p-2 rounded-md transition-colors cursor-pointer border ${
+                                selectedComponentIds.has(comp.id) 
+                                  ? 'bg-blue-50 border-blue-200' 
+                                  : 'hover:bg-slate-100 border-transparent'
+                              }`}
+                              onClick={() => toggleComponentSelection(comp.id)}
+                            >
+                              <Checkbox 
+                                checked={selectedComponentIds.has(comp.id)}
+                                onCheckedChange={() => toggleComponentSelection(comp.id)}
+                                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 shrink-0"
+                              />
+                              <div className="flex-1 min-w-0 overflow-hidden">
+                                <p className="text-sm font-medium truncate text-slate-700">{comp.name}</p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-8 text-xs text-slate-400">
+                            No components found
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  )}
                 </div>
               </TabsContent>
             </div>
