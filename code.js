@@ -11,7 +11,7 @@ figma.ui.postMessage({ type: 'loading', message: 'Loading components...' });
 })();
 // Send initial selection state
 function sendSelectionUpdate() {
-    var _a, _b, _c;
+    var _a, _b;
     const selection = figma.currentPage.selection;
     if (selection.length === 1) {
         const node = selection[0];
@@ -24,44 +24,28 @@ function sendSelectionUpdate() {
             if (node.type === 'INSTANCE') {
                 // For instances, get the component properties and their current values
                 const instanceNode = node;
-                if (instanceNode.mainComponent) {
-                    // Get the main component
-                    const mainComponent = instanceNode.mainComponent;
-                    // Get property definitions from the main component or its parent
-                    if (mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET') {
-                        propertyDefinitions = mainComponent.parent.componentPropertyDefinitions;
-                    }
-                    else {
-                        propertyDefinitions = mainComponent.componentPropertyDefinitions;
-                    }
-                    // Get actual property values from the instance
-                    if (propertyDefinitions) {
-                        for (const propKey in propertyDefinitions) {
-                            const propDef = propertyDefinitions[propKey];
-                            const propName = propKey.split('#')[0];
-                            // Get the actual value from the instance
-                            const instanceValue = (_a = instanceNode.componentProperties) === null || _a === void 0 ? void 0 : _a[propKey];
-                            if (instanceValue !== undefined) {
-                                if (propDef.type === 'VARIANT') {
-                                    properties[propName] = String(instanceValue);
-                                }
-                                else if (propDef.type === 'BOOLEAN') {
-                                    properties[propName] = String(instanceValue);
-                                }
-                                else if (propDef.type === 'TEXT') {
-                                    properties[propName] = String(instanceValue);
-                                }
-                                else if (propDef.type === 'INSTANCE_SWAP') {
-                                    properties[propName] = instanceValue ? 'instance' : 'none';
-                                }
+                // For selection preview, read directly from componentProperties (fast, works for all instances)
+                const componentProps = instanceNode.componentProperties;
+                if (componentProps) {
+                    for (const propKey in componentProps) {
+                        const propValue = componentProps[propKey];
+                        const propName = propKey.split('#')[0];
+                        // componentProperties values are objects with 'value' and 'type'
+                        if (propValue && typeof propValue === 'object' && 'value' in propValue) {
+                            const val = propValue.value;
+                            const propType = propValue.type;
+                            if (propType === 'VARIANT' || propType === 'BOOLEAN' || propType === 'TEXT') {
+                                properties[propName] = String(val);
+                            }
+                            else if (propType === 'INSTANCE_SWAP') {
+                                properties[propName] = val ? 'instance' : 'none';
                             }
                         }
                     }
-                    // Use the main component name
-                    nodeName = mainComponent.parent && mainComponent.parent.type === 'COMPONENT_SET'
-                        ? mainComponent.parent.name
-                        : mainComponent.name;
                 }
+                // Use instance name for display (fast fallback)
+                // Format: "ComponentName, Variant=Value" -> "ComponentName"
+                nodeName = instanceNode.name.split(',')[0].trim();
             }
             else if (node.type === 'COMPONENT') {
                 const componentNode = node;
@@ -88,7 +72,7 @@ function sendSelectionUpdate() {
                             const propDef = propertyDefinitions[propKey];
                             const propName = propKey.split('#')[0];
                             if (propDef.type === 'VARIANT') {
-                                const defaultValue = propDef.defaultValue || ((_b = propDef.variantOptions) === null || _b === void 0 ? void 0 : _b[0]) || '';
+                                const defaultValue = propDef.defaultValue || ((_a = propDef.variantOptions) === null || _a === void 0 ? void 0 : _a[0]) || '';
                                 properties[propName] = String(defaultValue);
                             }
                             else if (propDef.type === 'BOOLEAN') {
@@ -113,7 +97,7 @@ function sendSelectionUpdate() {
                         const propDef = propertyDefinitions[propKey];
                         const propName = propKey.split('#')[0];
                         if (propDef.type === 'VARIANT') {
-                            const defaultValue = propDef.defaultValue || ((_c = propDef.variantOptions) === null || _c === void 0 ? void 0 : _c[0]) || '';
+                            const defaultValue = propDef.defaultValue || ((_b = propDef.variantOptions) === null || _b === void 0 ? void 0 : _b[0]) || '';
                             properties[propName] = String(defaultValue);
                         }
                         else if (propDef.type === 'BOOLEAN') {
@@ -152,19 +136,22 @@ sendSelectionUpdate();
 figma.on('selectionchange', () => {
     sendSelectionUpdate();
 });
-// Listen for document changes to notify UI
-figma.on('documentchange', (event) => {
-    // Check if any component-related changes occurred
-    const hasComponentChanges = event.documentChanges.some(change => change.type === 'CREATE' ||
-        change.type === 'DELETE' ||
-        (change.type === 'PROPERTY_CHANGE' && change.properties.includes('name')));
-    if (hasComponentChanges) {
-        // Notify UI that components list may have changed
-        figma.ui.postMessage({
-            type: 'components-changed'
-        });
-    }
-});
+// Listen for document changes to notify UI (requires loadAllPagesAsync first)
+(async () => {
+    await figma.loadAllPagesAsync();
+    figma.on('documentchange', (event) => {
+        // Check if any component-related changes occurred
+        const hasComponentChanges = event.documentChanges.some(change => change.type === 'CREATE' ||
+            change.type === 'DELETE' ||
+            (change.type === 'PROPERTY_CHANGE' && change.properties.includes('name')));
+        if (hasComponentChanges) {
+            // Notify UI that components list may have changed
+            figma.ui.postMessage({
+                type: 'components-changed'
+            });
+        }
+    });
+})();
 // Listen for messages from the UI
 figma.ui.onmessage = async (msg) => {
     // When the UI asks to Export properties from current selection
@@ -193,7 +180,8 @@ figma.ui.onmessage = async (msg) => {
 /**
  * Main function to Export component properties from the current selection
  */
-function ExportComponentProperties(options) {
+async function ExportComponentProperties(options) {
+    console.log('[ExportComponentProperties] Starting with options:', JSON.stringify(options));
     // Get the currently selected node in Figma
     const selection = figma.currentPage.selection;
     // Check if exactly one node is selected
@@ -206,25 +194,36 @@ function ExportComponentProperties(options) {
         return;
     }
     const node = selection[0];
-    // Check if the selected node is a Component or ComponentSet
-    if (node.type === 'COMPONENT') {
-        // Single component
-        const result = ExportFromComponent(node, options);
-        sendSuccess(result);
+    console.log('[ExportComponentProperties] Selected node type:', node.type, 'name:', node.name);
+    try {
+        // Check if the selected node is a Component or ComponentSet
+        if (node.type === 'COMPONENT') {
+            // Single component
+            console.log('[ExportComponentProperties] Calling ExportFromComponent');
+            const result = await ExportFromComponent(node, options);
+            console.log('[ExportComponentProperties] Result:', JSON.stringify(result));
+            sendSuccess(result);
+        }
+        else if (node.type === 'COMPONENT_SET') {
+            // Component set (variants)
+            console.log('[ExportComponentProperties] Calling ExportFromComponentSet');
+            const result = await ExportFromComponentSet(node, options);
+            console.log('[ExportComponentProperties] Result:', JSON.stringify(result));
+            sendSuccess(result);
+        }
+        else {
+            sendError('Selected node must be a Component or Component Set. You selected: ' + node.type);
+        }
     }
-    else if (node.type === 'COMPONENT_SET') {
-        // Component set (variants)
-        const result = ExportFromComponentSet(node, options);
-        sendSuccess(result);
-    }
-    else {
-        sendError('Selected node must be a Component or Component Set. You selected: ' + node.type);
+    catch (error) {
+        console.error('[ExportComponentProperties] Error:', error);
+        sendError('Export failed: ' + String(error));
     }
 }
 /**
  * Export properties from a single Component
  */
-function ExportFromComponent(component, options) {
+async function ExportFromComponent(component, options) {
     const componentName = component.name;
     const result = {
         [componentName]: {}
@@ -249,22 +248,22 @@ function ExportFromComponent(component, options) {
     }
     // Export element styles if selected
     if (options.elementStyles) {
-        result[componentName].elementStyles = ExportElementStyles(component);
+        result[componentName].elementStyles = await ExportElementStyles(component);
     }
     // Export figma styles if selected
     if (options.figmaStyles) {
-        result[componentName].figmaStyles = ExportFigmaStyles(component);
+        result[componentName].figmaStyles = await ExportFigmaStyles(component);
     }
     // Export tokens if selected
     if (options.tokens) {
-        result[componentName].tokens = ExportTokens(component);
+        result[componentName].tokens = await ExportTokens(component);
     }
     return result;
 }
 /**
  * Export properties from a ComponentSet (variants)
  */
-function ExportFromComponentSet(componentSet, options) {
+async function ExportFromComponentSet(componentSet, options) {
     const componentName = componentSet.name;
     const result = {
         [componentName]: {}
@@ -279,15 +278,15 @@ function ExportFromComponentSet(componentSet, options) {
     }
     // Export element styles if selected
     if (options.elementStyles) {
-        result[componentName].elementStyles = ExportElementStyles(componentSet);
+        result[componentName].elementStyles = await ExportElementStyles(componentSet);
     }
     // Export figma styles if selected
     if (options.figmaStyles) {
-        result[componentName].figmaStyles = ExportFigmaStyles(componentSet);
+        result[componentName].figmaStyles = await ExportFigmaStyles(componentSet);
     }
     // Export tokens if selected
     if (options.tokens) {
-        result[componentName].tokens = ExportTokens(componentSet);
+        result[componentName].tokens = await ExportTokens(componentSet);
     }
     return result;
 }
@@ -417,9 +416,9 @@ function ExportAnatomy(node) {
 /**
  * Export element styles (inline styles) from a component
  */
-function ExportElementStyles(node) {
+async function ExportElementStyles(node) {
     const styles = {};
-    function getNodeStyles(n) {
+    async function getNodeStyles(n) {
         const nodeStyles = {
             name: n.name,
             type: n.type
@@ -427,12 +426,12 @@ function ExportElementStyles(node) {
         // Get bound variables to check for tokens
         const boundVariables = n.boundVariables;
         // Helper function to get token name or actual value
-        function getValueOrToken(propertyName, actualValue) {
+        async function getValueOrToken(propertyName, actualValue) {
             if (boundVariables && propertyName in boundVariables) {
                 const varRef = boundVariables[propertyName];
                 if (varRef && 'id' in varRef) {
                     try {
-                        const variable = figma.variables.getVariableById(varRef.id);
+                        const variable = await figma.variables.getVariableByIdAsync(varRef.id);
                         if (variable) {
                             return `$${variable.name}`;
                         }
@@ -452,7 +451,7 @@ function ExportElementStyles(node) {
                 for (const fillVar of boundVariables.fills) {
                     if (fillVar && 'id' in fillVar) {
                         try {
-                            const variable = figma.variables.getVariableById(fillVar.id);
+                            const variable = await figma.variables.getVariableByIdAsync(fillVar.id);
                             if (variable) {
                                 fillTokens.push(`$${variable.name}`);
                             }
@@ -495,39 +494,39 @@ function ExportElementStyles(node) {
         // Export text properties
         if (n.type === 'TEXT') {
             const textNode = n;
-            nodeStyles.fontSize = getValueOrToken('fontSize', textNode.fontSize);
+            nodeStyles.fontSize = await getValueOrToken('fontSize', textNode.fontSize);
             nodeStyles.fontName = textNode.fontName;
             nodeStyles.textAlignHorizontal = textNode.textAlignHorizontal;
             nodeStyles.textAlignVertical = textNode.textAlignVertical;
-            nodeStyles.letterSpacing = getValueOrToken('letterSpacing', textNode.letterSpacing);
-            nodeStyles.lineHeight = getValueOrToken('lineHeight', textNode.lineHeight);
+            nodeStyles.letterSpacing = await getValueOrToken('letterSpacing', textNode.letterSpacing);
+            nodeStyles.lineHeight = await getValueOrToken('lineHeight', textNode.lineHeight);
         }
         // Export layout properties
         if ('layoutMode' in n) {
             nodeStyles.layoutMode = n.layoutMode;
             nodeStyles.primaryAxisAlignItems = n.primaryAxisAlignItems;
             nodeStyles.counterAxisAlignItems = n.counterAxisAlignItems;
-            nodeStyles.paddingLeft = getValueOrToken('paddingLeft', n.paddingLeft);
-            nodeStyles.paddingRight = getValueOrToken('paddingRight', n.paddingRight);
-            nodeStyles.paddingTop = getValueOrToken('paddingTop', n.paddingTop);
-            nodeStyles.paddingBottom = getValueOrToken('paddingBottom', n.paddingBottom);
-            nodeStyles.itemSpacing = getValueOrToken('itemSpacing', n.itemSpacing);
+            nodeStyles.paddingLeft = await getValueOrToken('paddingLeft', n.paddingLeft);
+            nodeStyles.paddingRight = await getValueOrToken('paddingRight', n.paddingRight);
+            nodeStyles.paddingTop = await getValueOrToken('paddingTop', n.paddingTop);
+            nodeStyles.paddingBottom = await getValueOrToken('paddingBottom', n.paddingBottom);
+            nodeStyles.itemSpacing = await getValueOrToken('itemSpacing', n.itemSpacing);
         }
         // Export size properties
-        nodeStyles.width = getValueOrToken('width', n.width);
-        nodeStyles.height = getValueOrToken('height', n.height);
+        nodeStyles.width = await getValueOrToken('width', n.width);
+        nodeStyles.height = await getValueOrToken('height', n.height);
         // Export corner radius
         if ('cornerRadius' in n) {
-            nodeStyles.cornerRadius = getValueOrToken('cornerRadius', n.cornerRadius);
+            nodeStyles.cornerRadius = await getValueOrToken('cornerRadius', n.cornerRadius);
         }
         return nodeStyles;
     }
-    function traverseForStyles(n) {
-        styles[n.name] = getNodeStyles(n);
+    async function traverseForStyles(n) {
+        styles[n.name] = await getNodeStyles(n);
         // If node has children, traverse them
         if ('children' in n) {
             for (const child of n.children) {
-                traverseForStyles(child);
+                await traverseForStyles(child);
             }
         }
     }
@@ -536,14 +535,14 @@ function ExportElementStyles(node) {
         const firstVariant = node.children[0];
         if ('children' in firstVariant) {
             for (const child of firstVariant.children) {
-                traverseForStyles(child);
+                await traverseForStyles(child);
             }
         }
     }
     else if ('children' in node) {
         // For regular Component, traverse its children
         for (const child of node.children) {
-            traverseForStyles(child);
+            await traverseForStyles(child);
         }
     }
     return styles;
@@ -551,17 +550,23 @@ function ExportElementStyles(node) {
 /**
  * Export Figma styles (named styles) applied to a component
  */
-function ExportFigmaStyles(node) {
+async function ExportFigmaStyles(node) {
+    console.log('[ExportFigmaStyles] Starting for node:', node.name);
     const figmaStyles = {
         fillStyles: [],
         strokeStyles: [],
         textStyles: [],
         effectStyles: []
     };
-    function collectStyles(n) {
-        // Collect fill style
-        if ('fillStyleId' in n && n.fillStyleId && n.fillStyleId !== '') {
-            const style = figma.getStyleById(n.fillStyleId);
+    async function collectStyles(n) {
+        console.log('[collectStyles] Processing node:', n.name, 'type:', n.type);
+        // Collect fill style (check for string type to avoid figma.mixed symbol)
+        if ('fillStyleId' in n) {
+            console.log('[collectStyles] fillStyleId:', n.fillStyleId, 'type:', typeof n.fillStyleId);
+        }
+        if ('fillStyleId' in n && typeof n.fillStyleId === 'string' && n.fillStyleId !== '') {
+            const style = await figma.getStyleByIdAsync(n.fillStyleId);
+            console.log('[collectStyles] Got fill style:', (style === null || style === void 0 ? void 0 : style.name) || 'null');
             if (style) {
                 figmaStyles.fillStyles.push({
                     node: n.name,
@@ -570,8 +575,8 @@ function ExportFigmaStyles(node) {
             }
         }
         // Collect stroke style
-        if ('strokeStyleId' in n && n.strokeStyleId && n.strokeStyleId !== '') {
-            const style = figma.getStyleById(n.strokeStyleId);
+        if ('strokeStyleId' in n && typeof n.strokeStyleId === 'string' && n.strokeStyleId !== '') {
+            const style = await figma.getStyleByIdAsync(n.strokeStyleId);
             if (style) {
                 figmaStyles.strokeStyles.push({
                     node: n.name,
@@ -582,8 +587,8 @@ function ExportFigmaStyles(node) {
         // Collect text style
         if (n.type === 'TEXT') {
             const textNode = n;
-            if (textNode.textStyleId && textNode.textStyleId !== '') {
-                const style = figma.getStyleById(textNode.textStyleId);
+            if (typeof textNode.textStyleId === 'string' && textNode.textStyleId !== '') {
+                const style = await figma.getStyleByIdAsync(textNode.textStyleId);
                 if (style) {
                     figmaStyles.textStyles.push({
                         node: n.name,
@@ -593,8 +598,8 @@ function ExportFigmaStyles(node) {
             }
         }
         // Collect effect style
-        if ('effectStyleId' in n && n.effectStyleId && n.effectStyleId !== '') {
-            const style = figma.getStyleById(n.effectStyleId);
+        if ('effectStyleId' in n && typeof n.effectStyleId === 'string' && n.effectStyleId !== '') {
+            const style = await figma.getStyleByIdAsync(n.effectStyleId);
             if (style) {
                 figmaStyles.effectStyles.push({
                     node: n.name,
@@ -605,7 +610,7 @@ function ExportFigmaStyles(node) {
         // Traverse children
         if ('children' in n) {
             for (const child of n.children) {
-                collectStyles(child);
+                await collectStyles(child);
             }
         }
     }
@@ -614,14 +619,14 @@ function ExportFigmaStyles(node) {
         const firstVariant = node.children[0];
         if ('children' in firstVariant) {
             for (const child of firstVariant.children) {
-                collectStyles(child);
+                await collectStyles(child);
             }
         }
     }
     else if ('children' in node) {
         // For regular Component, traverse its children
         for (const child of node.children) {
-            collectStyles(child);
+            await collectStyles(child);
         }
     }
     // Remove empty arrays
@@ -634,12 +639,14 @@ function ExportFigmaStyles(node) {
         result.textStyles = figmaStyles.textStyles;
     if (figmaStyles.effectStyles.length > 0)
         result.effectStyles = figmaStyles.effectStyles;
+    console.log('[ExportFigmaStyles] Result:', JSON.stringify(result));
     return result;
 }
 /**
  * Export design tokens (variables) from a component
  */
-function ExportTokens(node) {
+async function ExportTokens(node) {
+    console.log('[ExportTokens] Starting for node:', node.name);
     const tokens = {
         colors: [],
         spacing: [],
@@ -647,16 +654,21 @@ function ExportTokens(node) {
         typography: [],
         other: []
     };
-    function collectTokens(n) {
+    async function collectTokens(n) {
+        console.log('[collectTokens] Processing node:', n.name);
         // Collect bound variables
         const boundVariables = n.boundVariables;
+        console.log('[collectTokens] boundVariables:', boundVariables ? Object.keys(boundVariables) : 'none');
         if (boundVariables) {
             // Check fills
             if ('fills' in boundVariables && Array.isArray(boundVariables.fills)) {
+                console.log('[collectTokens] Found fills variables:', boundVariables.fills.length);
                 for (const fillVar of boundVariables.fills) {
                     if (fillVar && 'id' in fillVar) {
                         try {
-                            const variable = figma.variables.getVariableById(fillVar.id);
+                            console.log('[collectTokens] Getting variable by id:', fillVar.id);
+                            const variable = await figma.variables.getVariableByIdAsync(fillVar.id);
+                            console.log('[collectTokens] Got variable:', (variable === null || variable === void 0 ? void 0 : variable.name) || 'null');
                             if (variable) {
                                 tokens.colors.push({
                                     node: n.name,
@@ -665,7 +677,7 @@ function ExportTokens(node) {
                             }
                         }
                         catch (e) {
-                            // Variable might not exist
+                            console.log('[collectTokens] Error getting variable:', e);
                         }
                     }
                 }
@@ -686,7 +698,7 @@ function ExportTokens(node) {
                     const varRef = boundVariables[mapping.prop];
                     if (varRef && 'id' in varRef) {
                         try {
-                            const variable = figma.variables.getVariableById(varRef.id);
+                            const variable = await figma.variables.getVariableByIdAsync(varRef.id);
                             if (variable) {
                                 tokens[mapping.category].push({
                                     node: n.name,
@@ -705,7 +717,7 @@ function ExportTokens(node) {
         // Traverse children
         if ('children' in n) {
             for (const child of n.children) {
-                collectTokens(child);
+                await collectTokens(child);
             }
         }
     }
@@ -714,14 +726,14 @@ function ExportTokens(node) {
         const firstVariant = node.children[0];
         if ('children' in firstVariant) {
             for (const child of firstVariant.children) {
-                collectTokens(child);
+                await collectTokens(child);
             }
         }
     }
     else if ('children' in node) {
         // For regular Component, traverse its children
         for (const child of node.children) {
-            collectTokens(child);
+            await collectTokens(child);
         }
     }
     // Remove empty arrays
@@ -869,7 +881,7 @@ async function getAllComponents(forceRefresh = false) {
 /**
  * Export multiple components by their IDs
  */
-function ExportMultipleComponents(componentIds, options) {
+async function ExportMultipleComponents(componentIds, options) {
     const results = {};
     for (const id of componentIds) {
         const node = figma.getNodeById(id);
@@ -877,11 +889,11 @@ function ExportMultipleComponents(componentIds, options) {
             continue;
         }
         if (node.type === 'COMPONENT') {
-            const result = ExportFromComponent(node, options);
+            const result = await ExportFromComponent(node, options);
             Object.assign(results, result);
         }
         else if (node.type === 'COMPONENT_SET') {
-            const result = ExportFromComponentSet(node, options);
+            const result = await ExportFromComponentSet(node, options);
             Object.assign(results, result);
         }
     }

@@ -1,9 +1,10 @@
 {
-  "name": "Props Exporter (YAML/JSON)",
-  "id": "component-props-Exportor",
+  "name": "Prop Drop",
+  "id": "1595065889265816902",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "dist/index.html",
+  "documentAccess": "dynamic-page",
   "editorType": ["figma", "dev"],
   "capabilities": ["inspect"],
   "networkAccess": {

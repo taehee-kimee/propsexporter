@@ -1,5 +1,5 @@
 {
-  "name": "component-props-Exportor",
+  "name": "prop-drop",
   "version": "1.0.0",
   "description": "A Figma plugin that Exports component properties to JSON",
   "main": "code.js",
