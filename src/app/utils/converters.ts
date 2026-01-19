@@ -11,58 +11,55 @@ export const convertAnatomyToTree = (anatomyData: any): string => {
   interface TreeNode {
     name: string;
     type: string;
-    depth: number;
     path: string;
+    parentPath: string;
     children: TreeNode[];
   }
 
-  // Helper function to build tree from flat anatomy
+  // Helper function to build tree from flat anatomy (array or object)
   function buildTreeFromAnatomy(anatomy: any): TreeNode[] {
-    const nodes: TreeNode[] = [];
+    let nodesArray: any[] = [];
 
-    for (const nodeName in anatomy) {
-      const node = anatomy[nodeName];
-      const path = node.path || '';
-      const parts = path.split(' > ');
-      const depth = parts.length - 1;
-
-      nodes.push({
+    // Check if anatomy is array or object
+    if (Array.isArray(anatomy)) {
+      nodesArray = anatomy;
+    } else {
+      // Convert object to array for backwards compatibility
+      nodesArray = Object.keys(anatomy).map(nodeName => ({
         name: nodeName,
-        type: node.type || 'UNKNOWN',
-        depth: depth,
-        path: path,
-        children: []
-      });
+        type: anatomy[nodeName].type,
+        path: anatomy[nodeName].path,
+        parentPath: anatomy[nodeName].path.split(' > ').slice(0, -1).join(' > ')
+      }));
     }
 
-    // Sort by path to maintain hierarchy
-    nodes.sort((a, b) => {
-      const aPath = a.path.split(' > ');
-      const bPath = b.path.split(' > ');
-
-      for (let i = 0; i < Math.min(aPath.length, bPath.length); i++) {
-        if (aPath[i] !== bPath[i]) {
-          return aPath[i].localeCompare(bPath[i]);
-        }
-      }
-      return aPath.length - bPath.length;
-    });
-
-    // Build hierarchical structure
+    // Build hierarchical structure while preserving order
     const rootNodes: TreeNode[] = [];
-    const nodeMap = new Map<string, TreeNode>();
+    const nodesByPath = new Map<string, TreeNode>();
 
-    for (const node of nodes) {
-      nodeMap.set(node.path, node);
-      const pathParts = node.path.split(' > ');
+    for (const nodeData of nodesArray) {
+      const treeNode: TreeNode = {
+        name: nodeData.name,
+        type: nodeData.type || 'UNKNOWN',
+        path: nodeData.path || nodeData.name,
+        parentPath: nodeData.parentPath || '',
+        children: []
+      };
 
-      if (pathParts.length === 1) {
-        rootNodes.push(node);
+      // Store node by its path (with index to handle duplicates)
+      const pathKey = nodeData.path || nodeData.name;
+      nodesByPath.set(pathKey, treeNode);
+
+      // Add to parent or root
+      if (!nodeData.parentPath || nodeData.parentPath === '') {
+        rootNodes.push(treeNode);
       } else {
-        const parentPath = pathParts.slice(0, -1).join(' > ');
-        const parentNode = nodeMap.get(parentPath);
-        if (parentNode) {
-          parentNode.children.push(node);
+        const parent = nodesByPath.get(nodeData.parentPath);
+        if (parent) {
+          parent.children.push(treeNode);
+        } else {
+          // If parent not found, add to root (shouldn't happen normally)
+          rootNodes.push(treeNode);
         }
       }
     }
@@ -107,17 +104,18 @@ export const convertAnatomyToTree = (anatomyData: any): string => {
     return lines.join('\n');
   }
 
-  // Helper function to compare anatomies
+  // Helper function to compare anatomies (supports both array and object)
   function compareAnatomies(anat1: any, anat2: any): boolean {
-    const keys1 = Object.keys(anat1).sort();
-    const keys2 = Object.keys(anat2).sort();
+    // Convert to arrays if needed
+    const arr1 = Array.isArray(anat1) ? anat1 : Object.keys(anat1).map(k => anat1[k]);
+    const arr2 = Array.isArray(anat2) ? anat2 : Object.keys(anat2).map(k => anat2[k]);
 
-    if (keys1.length !== keys2.length) return false;
-    if (keys1.join(',') !== keys2.join(',')) return false;
+    if (arr1.length !== arr2.length) return false;
 
-    for (const key of keys1) {
-      if (anat1[key].type !== anat2[key].type) return false;
-      if (anat1[key].path !== anat2[key].path) return false;
+    for (let i = 0; i < arr1.length; i++) {
+      if (arr1[i].name !== arr2[i].name) return false;
+      if (arr1[i].type !== arr2[i].type) return false;
+      if (arr1[i].path !== arr2[i].path) return false;
     }
 
     return true;
@@ -125,10 +123,12 @@ export const convertAnatomyToTree = (anatomyData: any): string => {
 
   // Check if anatomyData contains variants (nested structure)
   const firstKey = Object.keys(anatomyData)[0];
-  const isVariantBased = anatomyData[firstKey] &&
-                         typeof anatomyData[firstKey] === 'object' &&
-                         anatomyData[firstKey].type === undefined &&
-                         anatomyData[firstKey].path === undefined;
+  const firstValue = anatomyData[firstKey];
+  const isVariantBased = firstValue &&
+                         (Array.isArray(firstValue) ||
+                          (typeof firstValue === 'object' &&
+                           firstValue.type === undefined &&
+                           firstValue.path === undefined));
 
   if (isVariantBased) {
     // Handle variant-based anatomy
