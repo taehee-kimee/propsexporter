@@ -3,6 +3,93 @@ export const convertToJSON = (data: any) => {
   return JSON.stringify(data, null, 2);
 };
 
+export const convertAnatomyToTree = (anatomyData: any): string => {
+  if (!anatomyData || typeof anatomyData !== 'object') {
+    return '';
+  }
+
+  interface TreeNode {
+    name: string;
+    type: string;
+    depth: number;
+    path: string;
+    children: TreeNode[];
+  }
+
+  // Build tree structure from flat anatomy data
+  const nodes: TreeNode[] = [];
+  
+  for (const nodeName in anatomyData) {
+    const node = anatomyData[nodeName];
+    const path = node.path || '';
+    const parts = path.split(' > ');
+    const depth = parts.length - 1;
+    
+    nodes.push({
+      name: nodeName,
+      type: node.type || 'UNKNOWN',
+      depth: depth,
+      path: path,
+      children: []
+    });
+  }
+
+  // Sort by path to maintain hierarchy
+  nodes.sort((a, b) => {
+    const aPath = a.path.split(' > ');
+    const bPath = b.path.split(' > ');
+    
+    for (let i = 0; i < Math.min(aPath.length, bPath.length); i++) {
+      if (aPath[i] !== bPath[i]) {
+        return aPath[i].localeCompare(bPath[i]);
+      }
+    }
+    return aPath.length - bPath.length;
+  });
+
+  // Build hierarchical structure
+  const rootNodes: TreeNode[] = [];
+  const nodeMap = new Map<string, TreeNode>();
+
+  for (const node of nodes) {
+    nodeMap.set(node.path, node);
+    const pathParts = node.path.split(' > ');
+    
+    if (pathParts.length === 1) {
+      rootNodes.push(node);
+    } else {
+      const parentPath = pathParts.slice(0, -1).join(' > ');
+      const parentNode = nodeMap.get(parentPath);
+      if (parentNode) {
+        parentNode.children.push(node);
+      }
+    }
+  }
+
+  // Render tree with box-drawing characters
+  const lines: string[] = [];
+  
+  function renderNode(node: TreeNode, prefix: string, isLast: boolean) {
+    const connector = isLast ? '└── ' : '├── ';
+    const line = `${prefix}${connector}${node.name} [${node.type}]`;
+    lines.push(line);
+    
+    const childPrefix = prefix + (isLast ? '    ' : '│   ');
+    
+    node.children.forEach((child, index) => {
+      const isLastChild = index === node.children.length - 1;
+      renderNode(child, childPrefix, isLastChild);
+    });
+  }
+
+  rootNodes.forEach((root, index) => {
+    const isLastRoot = index === rootNodes.length - 1;
+    renderNode(root, '', isLastRoot);
+  });
+
+  return lines.join('\n');
+};
+
 export const convertToYAML = (data: any, indent = 0): string => {
   const indentStr = '  '.repeat(indent);
   let result = '';

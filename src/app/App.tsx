@@ -32,12 +32,16 @@ import { Badge } from './components/ui/badge';
 
 import { 
   convertToJSON, 
-  convertToYAML
+  convertToYAML,
+  convertAnatomyToTree,
+  convertToTypeScript,
+  convertToJSDoc
 } from './utils/converters';
 
 import { Toaster } from './components/ui/sonner';
 
-type OutputFormat = 'json' | 'yaml';
+type OutputFormat = 'json' | 'yaml' | 'typescript' | 'jsdoc';
+type AnatomyView = 'yaml' | 'tree';
 
 export default function App() {
   console.log("App component rendering...");
@@ -49,6 +53,7 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [output, setOutput] = useState('');
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('yaml');
+  const [anatomyView, setAnatomyView] = useState<AnatomyView>('yaml');
   const [selection, setSelection] = useState<{name: string, type: string, properties?: Record<string, string>} | null>(null);
   const [components, setComponents] = useState<Array<{id: string, name: string, type: string}>>([]);
   const [ExportedData, setExportedData] = useState<any>(null);
@@ -123,19 +128,31 @@ export default function App() {
       return;
     }
     
-    // Convert to selected format
     let formattedOutput = '';
-    switch (outputFormat) {
-      case 'json':
-        formattedOutput = convertToJSON(ExportedData);
-        break;
-      case 'yaml':
-        formattedOutput = convertToYAML(ExportedData);
-        break;
+    
+    // If anatomy exists and tree view is selected, show tree regardless of output format
+    if (ExportedData.anatomy && anatomyView === 'tree' && options.anatomy) {
+      formattedOutput = convertAnatomyToTree(ExportedData.anatomy);
+    } else {
+      // Otherwise convert to selected format
+      switch (outputFormat) {
+        case 'json':
+          formattedOutput = convertToJSON(ExportedData);
+          break;
+        case 'yaml':
+          formattedOutput = convertToYAML(ExportedData);
+          break;
+        case 'typescript':
+          formattedOutput = convertToTypeScript(ExportedData);
+          break;
+        case 'jsdoc':
+          formattedOutput = convertToJSDoc(ExportedData);
+          break;
+      }
     }
     
     setOutput(formattedOutput);
-  }, [ExportedData, outputFormat]);
+  }, [ExportedData, outputFormat, anatomyView, options.anatomy]);
 
   // Handlers
   const toggleComponentSelection = (id: string) => {
@@ -357,13 +374,39 @@ export default function App() {
                 />
                 <Label htmlFor="opt-prop" className="text-xs font-normal cursor-pointer">Properties</Label>
               </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="opt-anat" 
-                  checked={options.anatomy} 
-                  onCheckedChange={() => handleOptionChange('anatomy')}
-                />
-                <Label htmlFor="opt-anat" className="text-xs font-normal cursor-pointer">Anatomy</Label>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="opt-anat" 
+                    checked={options.anatomy} 
+                    onCheckedChange={() => handleOptionChange('anatomy')}
+                  />
+                  <Label htmlFor="opt-anat" className="text-xs font-normal cursor-pointer">Anatomy</Label>
+                </div>
+                {options.anatomy && (
+                  <div className="flex rounded-md border border-slate-200 overflow-hidden">
+                    <button
+                      onClick={() => setAnatomyView('yaml')}
+                      className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                        anatomyView === 'yaml' 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      YAML
+                    </button>
+                    <button
+                      onClick={() => setAnatomyView('tree')}
+                      className={`px-2 py-0.5 text-[10px] font-medium transition-colors border-l border-slate-200 ${
+                        anatomyView === 'tree' 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      Tree
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="flex items-center space-x-2">
                 <Checkbox 
@@ -402,6 +445,16 @@ export default function App() {
                       <FileJson className="w-3.5 h-3.5 opacity-70" /> JSON
                     </div>
                   </SelectItem>
+                  <SelectItem value="typescript">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-3.5 h-3.5 opacity-70" /> TypeScript
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="jsdoc">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-3.5 h-3.5 opacity-70" /> JSDoc
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -430,7 +483,7 @@ export default function App() {
             {output ? "Exportion Result" : "Ready to Export"}
           </div>
           <div className="flex gap-2">
-             <Button 
+            <Button 
               variant="outline" 
               size="sm" 
               className="h-7 text-xs gap-1.5"

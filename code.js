@@ -178,7 +178,7 @@ figma.ui.onmessage = async (msg) => {
     // When the UI asks to refresh components (clear cache)
     if (msg.type === 'refresh-components') {
         await figma.clientStorage.deleteAsync('componentsList');
-        await figma.clientStorage.deleteAsync('cacheTime');
+        await figma.clientStorage.deleteAsync('componentsHash');
         await getAllComponents(true);
     }
     // When the UI asks to Export multiple components
@@ -708,6 +708,38 @@ function ExportTokens(node) {
     return result;
 }
 /**
+ * Generate a simple hash of component names and IDs for change detection
+ */
+async function getComponentsHash() {
+    const componentIds = [];
+    function findComponentIds(node) {
+        if (node.type === 'COMPONENT_SET') {
+            const compSet = node;
+            if (compSet.key && !compSet.name.startsWith('.')) {
+                componentIds.push(`${node.id}:${node.name}`);
+            }
+        }
+        else if (node.type === 'COMPONENT') {
+            if (!node.parent || node.parent.type !== 'COMPONENT_SET') {
+                const comp = node;
+                if (comp.key && !comp.name.startsWith('.')) {
+                    componentIds.push(`${node.id}:${node.name}`);
+                }
+            }
+        }
+        if ('children' in node) {
+            for (const child of node.children) {
+                findComponentIds(child);
+            }
+        }
+    }
+    for (const page of figma.root.children) {
+        findComponentIds(page);
+    }
+    // Create a simple hash from sorted IDs
+    return componentIds.sort().join('|');
+}
+/**
  * Get all components and component sets in the current file with caching
  */
 async function getAllComponents(forceRefresh = false) {
@@ -715,18 +747,31 @@ async function getAllComponents(forceRefresh = false) {
         // Check cache first (unless force refresh)
         if (!forceRefresh) {
             const cached = await figma.clientStorage.getAsync('componentsList');
-            const cacheTime = await figma.clientStorage.getAsync('cacheTime');
-            const now = Date.now();
-            const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-            // If cache is valid, use it
-            if (cached && cacheTime && (now - cacheTime < CACHE_DURATION)) {
-                console.log('Using cached components');
+            const cachedHash = await figma.clientStorage.getAsync('componentsHash');
+            // Quick check: if we have cached data, send it first, then verify in background
+            if (cached && cachedHash) {
+                console.log('Sending cached components, verifying freshness...');
+                // Send cached data immediately
                 figma.ui.postMessage({
                     type: 'components-list',
                     components: cached,
-                    fromCache: true
+                    fromCache: false
                 });
-                return;
+                // Verify if components have changed by doing a quick scan
+                const quickScan = await getComponentsHash();
+                if (quickScan !== cachedHash) {
+                    console.log('Components have changed, prompting refresh');
+                    // Components changed, update cache and notify UI
+                    figma.ui.postMessage({
+                        type: 'components-list',
+                        components: cached,
+                        fromCache: true // Show refresh button
+                    });
+                }
+                else {
+                    console.log('Components unchanged');
+                    return;
+                }
             }
         }
         // Fetch fresh data
@@ -771,9 +816,10 @@ async function getAllComponents(forceRefresh = false) {
         for (const page of figma.root.children) {
             findComponents(page);
         }
-        // Save to cache
+        // Save to cache with components hash
+        const componentsHash = await getComponentsHash();
         await figma.clientStorage.setAsync('componentsList', components);
-        await figma.clientStorage.setAsync('cacheTime', Date.now());
+        await figma.clientStorage.setAsync('componentsHash', componentsHash);
         // Send the list to UI
         figma.ui.postMessage({
             type: 'components-list',
