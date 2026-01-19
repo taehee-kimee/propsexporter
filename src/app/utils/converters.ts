@@ -16,78 +16,183 @@ export const convertAnatomyToTree = (anatomyData: any): string => {
     children: TreeNode[];
   }
 
-  // Build tree structure from flat anatomy data
-  const nodes: TreeNode[] = [];
-  
-  for (const nodeName in anatomyData) {
-    const node = anatomyData[nodeName];
-    const path = node.path || '';
-    const parts = path.split(' > ');
-    const depth = parts.length - 1;
-    
-    nodes.push({
-      name: nodeName,
-      type: node.type || 'UNKNOWN',
-      depth: depth,
-      path: path,
-      children: []
-    });
-  }
+  // Helper function to build tree from flat anatomy
+  function buildTreeFromAnatomy(anatomy: any): TreeNode[] {
+    const nodes: TreeNode[] = [];
 
-  // Sort by path to maintain hierarchy
-  nodes.sort((a, b) => {
-    const aPath = a.path.split(' > ');
-    const bPath = b.path.split(' > ');
-    
-    for (let i = 0; i < Math.min(aPath.length, bPath.length); i++) {
-      if (aPath[i] !== bPath[i]) {
-        return aPath[i].localeCompare(bPath[i]);
+    for (const nodeName in anatomy) {
+      const node = anatomy[nodeName];
+      const path = node.path || '';
+      const parts = path.split(' > ');
+      const depth = parts.length - 1;
+
+      nodes.push({
+        name: nodeName,
+        type: node.type || 'UNKNOWN',
+        depth: depth,
+        path: path,
+        children: []
+      });
+    }
+
+    // Sort by path to maintain hierarchy
+    nodes.sort((a, b) => {
+      const aPath = a.path.split(' > ');
+      const bPath = b.path.split(' > ');
+
+      for (let i = 0; i < Math.min(aPath.length, bPath.length); i++) {
+        if (aPath[i] !== bPath[i]) {
+          return aPath[i].localeCompare(bPath[i]);
+        }
+      }
+      return aPath.length - bPath.length;
+    });
+
+    // Build hierarchical structure
+    const rootNodes: TreeNode[] = [];
+    const nodeMap = new Map<string, TreeNode>();
+
+    for (const node of nodes) {
+      nodeMap.set(node.path, node);
+      const pathParts = node.path.split(' > ');
+
+      if (pathParts.length === 1) {
+        rootNodes.push(node);
+      } else {
+        const parentPath = pathParts.slice(0, -1).join(' > ');
+        const parentNode = nodeMap.get(parentPath);
+        if (parentNode) {
+          parentNode.children.push(node);
+        }
       }
     }
-    return aPath.length - bPath.length;
-  });
 
-  // Build hierarchical structure
-  const rootNodes: TreeNode[] = [];
-  const nodeMap = new Map<string, TreeNode>();
+    return rootNodes;
+  }
 
-  for (const node of nodes) {
-    nodeMap.set(node.path, node);
-    const pathParts = node.path.split(' > ');
-    
-    if (pathParts.length === 1) {
-      rootNodes.push(node);
-    } else {
-      const parentPath = pathParts.slice(0, -1).join(' > ');
-      const parentNode = nodeMap.get(parentPath);
-      if (parentNode) {
-        parentNode.children.push(node);
+  // Helper function to render tree
+  function renderTree(rootNodes: TreeNode[]): string {
+    const lines: string[] = [];
+
+    function renderNode(node: TreeNode, prefix: string, isLast: boolean, isRoot: boolean = false) {
+      if (isRoot) {
+        // Root node with special formatting
+        lines.push(`📦 ${node.name}`);
+        lines.push(`   └─ type: ${node.type}`);
+      } else {
+        // Child nodes with tree structure
+        const connector = isLast ? '└─ ' : '├─ ';
+        const typeInfo = node.type ? ` (${node.type})` : '';
+        const line = `${prefix}${connector}${node.name}${typeInfo}`;
+        lines.push(line);
+      }
+
+      const childPrefix = isRoot
+        ? '   '
+        : prefix + (isLast ? '   ' : '│  ');
+
+      node.children.forEach((child, index) => {
+        const isLastChild = index === node.children.length - 1;
+        renderNode(child, childPrefix, isLastChild, false);
+      });
+    }
+
+    rootNodes.forEach((root, index) => {
+      if (index > 0) {
+        lines.push(''); // Add blank line between root components
+      }
+      renderNode(root, '', true, true);
+    });
+
+    return lines.join('\n');
+  }
+
+  // Helper function to compare anatomies
+  function compareAnatomies(anat1: any, anat2: any): boolean {
+    const keys1 = Object.keys(anat1).sort();
+    const keys2 = Object.keys(anat2).sort();
+
+    if (keys1.length !== keys2.length) return false;
+    if (keys1.join(',') !== keys2.join(',')) return false;
+
+    for (const key of keys1) {
+      if (anat1[key].type !== anat2[key].type) return false;
+      if (anat1[key].path !== anat2[key].path) return false;
+    }
+
+    return true;
+  }
+
+  // Check if anatomyData contains variants (nested structure)
+  const firstKey = Object.keys(anatomyData)[0];
+  const isVariantBased = anatomyData[firstKey] &&
+                         typeof anatomyData[firstKey] === 'object' &&
+                         anatomyData[firstKey].type === undefined &&
+                         anatomyData[firstKey].path === undefined;
+
+  if (isVariantBased) {
+    // Handle variant-based anatomy
+    const variants = Object.keys(anatomyData);
+    const lines: string[] = [];
+
+    // Group variants by identical anatomy
+    const anatomyGroups: Map<string, string[]> = new Map();
+
+    for (const variantName of variants) {
+      const variantAnatomy = anatomyData[variantName];
+      let foundGroup = false;
+
+      for (const [signature, variantList] of anatomyGroups.entries()) {
+        const existingAnatomy = anatomyData[variantList[0]];
+        if (compareAnatomies(variantAnatomy, existingAnatomy)) {
+          variantList.push(variantName);
+          foundGroup = true;
+          break;
+        }
+      }
+
+      if (!foundGroup) {
+        const signature = JSON.stringify(variantAnatomy);
+        anatomyGroups.set(signature, [variantName]);
       }
     }
+
+    // If all variants have the same anatomy, show it once
+    if (anatomyGroups.size === 1) {
+      const firstVariant = variants[0];
+      const rootNodes = buildTreeFromAnatomy(anatomyData[firstVariant]);
+      return renderTree(rootNodes);
+    }
+
+    // Otherwise, show each group separately
+    let groupIndex = 0;
+    for (const [_, variantList] of anatomyGroups.entries()) {
+      if (groupIndex > 0) {
+        lines.push('');
+        lines.push('─'.repeat(60));
+        lines.push('');
+      }
+
+      // Header showing which variants share this structure
+      if (variantList.length === 1) {
+        lines.push(`[Variant: ${variantList[0]}]`);
+      } else {
+        lines.push(`[Variants: ${variantList.join(', ')}]`);
+      }
+      lines.push('');
+
+      const rootNodes = buildTreeFromAnatomy(anatomyData[variantList[0]]);
+      lines.push(renderTree(rootNodes));
+
+      groupIndex++;
+    }
+
+    return lines.join('\n');
+  } else {
+    // Handle single component anatomy (non-variant)
+    const rootNodes = buildTreeFromAnatomy(anatomyData);
+    return renderTree(rootNodes);
   }
-
-  // Render tree with box-drawing characters
-  const lines: string[] = [];
-  
-  function renderNode(node: TreeNode, prefix: string, isLast: boolean) {
-    const connector = isLast ? '└── ' : '├── ';
-    const line = `${prefix}${connector}${node.name} [${node.type}]`;
-    lines.push(line);
-    
-    const childPrefix = prefix + (isLast ? '    ' : '│   ');
-    
-    node.children.forEach((child, index) => {
-      const isLastChild = index === node.children.length - 1;
-      renderNode(child, childPrefix, isLastChild);
-    });
-  }
-
-  rootNodes.forEach((root, index) => {
-    const isLastRoot = index === rootNodes.length - 1;
-    renderNode(root, '', isLastRoot);
-  });
-
-  return lines.join('\n');
 };
 
 export const convertToYAML = (data: any, indent = 0): string => {

@@ -127,14 +127,46 @@ export default function App() {
       setOutput('');
       return;
     }
-    
+
     let formattedOutput = '';
-    
-    // If anatomy exists and tree view is selected, show tree regardless of output format
-    if (ExportedData.anatomy && anatomyView === 'tree' && options.anatomy) {
-      formattedOutput = convertAnatomyToTree(ExportedData.anatomy);
+
+    // Check if ExportedData has anatomy data
+    const hasAnatomy = Object.values(ExportedData).some((component: any) =>
+      component && component.anatomy && Object.keys(component.anatomy).length > 0
+    );
+
+    // If tree view is selected and anatomy exists, replace anatomy with tree format
+    if (anatomyView === 'tree' && options.anatomy && hasAnatomy) {
+      // Create a modified data structure with anatomy replaced by tree format
+      const modifiedData: any = {};
+
+      for (const componentName in ExportedData) {
+        const component = ExportedData[componentName];
+        modifiedData[componentName] = { ...component };
+
+        // Replace anatomy with tree representation
+        if (component && component.anatomy && Object.keys(component.anatomy).length > 0) {
+          modifiedData[componentName].anatomy = `\n${convertAnatomyToTree(component.anatomy)}`;
+        }
+      }
+
+      // Convert the modified data to the selected format
+      switch (outputFormat) {
+        case 'json':
+          formattedOutput = convertToJSON(modifiedData);
+          break;
+        case 'yaml':
+          formattedOutput = convertToYAML(modifiedData);
+          break;
+        case 'typescript':
+          formattedOutput = convertToTypeScript(modifiedData);
+          break;
+        case 'jsdoc':
+          formattedOutput = convertToJSDoc(modifiedData);
+          break;
+      }
     } else {
-      // Otherwise convert to selected format
+      // Otherwise convert to selected format as-is
       switch (outputFormat) {
         case 'json':
           formattedOutput = convertToJSON(ExportedData);
@@ -150,7 +182,7 @@ export default function App() {
           break;
       }
     }
-    
+
     setOutput(formattedOutput);
   }, [ExportedData, outputFormat, anatomyView, options.anatomy]);
 
@@ -367,59 +399,33 @@ export default function App() {
             <h3 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Export Options</h3>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="opt-prop" 
-                  checked={options.property} 
+                <Checkbox
+                  id="opt-prop"
+                  checked={options.property}
                   onCheckedChange={() => handleOptionChange('property')}
                 />
                 <Label htmlFor="opt-prop" className="text-xs font-normal cursor-pointer">Properties</Label>
               </div>
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="opt-anat" 
-                    checked={options.anatomy} 
-                    onCheckedChange={() => handleOptionChange('anatomy')}
-                  />
-                  <Label htmlFor="opt-anat" className="text-xs font-normal cursor-pointer">Anatomy</Label>
-                </div>
-                {options.anatomy && (
-                  <div className="flex rounded-md border border-slate-200 overflow-hidden">
-                    <button
-                      onClick={() => setAnatomyView('yaml')}
-                      className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                        anatomyView === 'yaml' 
-                          ? 'bg-blue-600 text-white' 
-                          : 'bg-white text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      YAML
-                    </button>
-                    <button
-                      onClick={() => setAnatomyView('tree')}
-                      className={`px-2 py-0.5 text-[10px] font-medium transition-colors border-l border-slate-200 ${
-                        anatomyView === 'tree' 
-                          ? 'bg-blue-600 text-white' 
-                          : 'bg-white text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      Tree
-                    </button>
-                  </div>
-                )}
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="opt-anat"
+                  checked={options.anatomy}
+                  onCheckedChange={() => handleOptionChange('anatomy')}
+                />
+                <Label htmlFor="opt-anat" className="text-xs font-normal cursor-pointer">Anatomy</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="opt-elstyle" 
-                  checked={options.elementStyles} 
+                <Checkbox
+                  id="opt-elstyle"
+                  checked={options.elementStyles}
                   onCheckedChange={() => handleOptionChange('elementStyles')}
                 />
                 <Label htmlFor="opt-elstyle" className="text-xs font-normal cursor-pointer">Styles</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="opt-tokens" 
-                  checked={options.tokens} 
+                <Checkbox
+                  id="opt-tokens"
+                  checked={options.tokens}
                   onCheckedChange={() => handleOptionChange('tokens')}
                 />
                 <Label htmlFor="opt-tokens" className="text-xs font-normal cursor-pointer">Tokens</Label>
@@ -498,6 +504,28 @@ export default function App() {
         <div className="flex-1 p-4 relative overflow-hidden">
           {output ? (
             <div className="absolute inset-4 rounded-lg border border-slate-200 shadow-sm bg-white overflow-hidden">
+              {/* Floating Tree View Toggle - Only show when anatomy is enabled */}
+              {options.anatomy && ExportedData && Object.values(ExportedData).some((component: any) =>
+                component && component.anatomy && Object.keys(component.anatomy).length > 0
+              ) && (
+                <div className="absolute top-3 right-3 z-10">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-white/95 backdrop-blur-sm border border-slate-200 rounded-md shadow-lg">
+                    <Checkbox
+                      id="tree-view-toggle"
+                      checked={anatomyView === 'tree'}
+                      onCheckedChange={(checked) => setAnatomyView(checked ? 'tree' : 'yaml')}
+                      className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                    />
+                    <Label
+                      htmlFor="tree-view-toggle"
+                      className="text-xs font-medium cursor-pointer text-slate-700 select-none"
+                    >
+                      Tree View
+                    </Label>
+                  </div>
+                </div>
+              )}
+
               <ScrollArea className="h-full w-full">
                 <pre className="p-4 font-mono text-[11px] leading-relaxed text-slate-700 whitespace-pre-wrap break-words">
                   {output}

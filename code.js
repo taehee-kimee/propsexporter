@@ -349,39 +349,64 @@ function ExportProperties(componentProperties) {
 }
 /**
  * Export anatomy (child structure) from a component
+ * For ComponentSet, exports anatomy from all variants to detect differences
  */
 function ExportAnatomy(node) {
-    const anatomy = {};
-    function traverseNode(n, path = '') {
-        const nodeName = n.name;
-        const fullPath = path ? `${path} > ${nodeName}` : nodeName;
-        anatomy[nodeName] = {
-            type: n.type,
-            path: fullPath
-        };
-        // If node has children, traverse them
-        if ('children' in n) {
-            for (const child of n.children) {
-                traverseNode(child, fullPath);
-            }
-        }
-    }
-    // For ComponentSet, get the first variant
+    // For ComponentSet with multiple variants, export anatomy from each variant
     if (node.type === 'COMPONENT_SET' && node.children.length > 0) {
-        const firstVariant = node.children[0];
-        if ('children' in firstVariant) {
-            for (const child of firstVariant.children) {
-                traverseNode(child);
+        const variantAnatomies = {};
+        for (const variant of node.children) {
+            if (variant.type === 'COMPONENT') {
+                const variantName = variant.name;
+                const anatomy = {};
+                function traverseNode(n, path = '') {
+                    const nodeName = n.name;
+                    const fullPath = path ? `${path} > ${nodeName}` : nodeName;
+                    anatomy[nodeName] = {
+                        type: n.type,
+                        path: fullPath
+                    };
+                    // If node has children, traverse them
+                    if ('children' in n) {
+                        for (const child of n.children) {
+                            traverseNode(child, fullPath);
+                        }
+                    }
+                }
+                // Traverse variant's children
+                if ('children' in variant) {
+                    for (const child of variant.children) {
+                        traverseNode(child);
+                    }
+                }
+                variantAnatomies[variantName] = anatomy;
             }
         }
+        return variantAnatomies;
     }
+    // For regular Component, export single anatomy
     else if ('children' in node) {
-        // For regular Component, traverse its children
+        const anatomy = {};
+        function traverseNode(n, path = '') {
+            const nodeName = n.name;
+            const fullPath = path ? `${path} > ${nodeName}` : nodeName;
+            anatomy[nodeName] = {
+                type: n.type,
+                path: fullPath
+            };
+            // If node has children, traverse them
+            if ('children' in n) {
+                for (const child of n.children) {
+                    traverseNode(child, fullPath);
+                }
+            }
+        }
         for (const child of node.children) {
             traverseNode(child);
         }
+        return anatomy;
     }
-    return anatomy;
+    return {};
 }
 /**
  * Export element styles (inline styles) from a component
