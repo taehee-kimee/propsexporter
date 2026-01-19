@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Search, 
-  RefreshCcw, 
-  Copy, 
-  Check, 
-  FileJson, 
+import {
+  Search,
+  RefreshCcw,
+  Copy,
+  Check,
+  FileJson,
   FileText,
   Play,
   Box,
-  MousePointer2
+  MousePointer2,
+  Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -18,25 +19,37 @@ import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
 import { Checkbox } from './components/ui/checkbox';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from './components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Separator } from './components/ui/separator';
 import { Textarea } from './components/ui/textarea';
 import { Badge } from './components/ui/badge';
 
-import { 
-  convertToJSON, 
+import {
+  convertToJSON,
   convertToYAML,
   convertAnatomyToTree,
   convertToTypeScript,
-  convertToJSDoc
+  convertToJSDoc,
+  convertToMarkdown
 } from './utils/converters';
+
+import {
+  downloadMarkdownFile,
+  downloadMultipleMarkdownFiles
+} from './utils/fileDownload';
 
 import { Toaster } from './components/ui/sonner';
 
@@ -240,7 +253,7 @@ export default function App() {
 
   const handleCopy = () => {
     if (!output) return;
-    
+
     try {
       // Create a temporary textarea element
       const textarea = document.createElement('textarea');
@@ -248,15 +261,15 @@ export default function App() {
       textarea.style.position = 'fixed';
       textarea.style.opacity = '0';
       document.body.appendChild(textarea);
-      
+
       // Select and copy the text
       textarea.select();
       textarea.setSelectionRange(0, textarea.value.length);
       const successful = document.execCommand('copy');
-      
+
       // Remove the temporary element
       document.body.removeChild(textarea);
-      
+
       if (successful) {
         toast.success("Copied to clipboard");
       } else {
@@ -264,6 +277,48 @@ export default function App() {
       }
     } catch (error) {
       toast.error("Failed to copy");
+    }
+  };
+
+  const handleDownloadFull = () => {
+    if (!ExportedData) return;
+
+    try {
+      const markdownContent = convertToMarkdown(ExportedData, {
+        anatomyView,
+        includeTableOfContents: Object.keys(ExportedData).length > 1
+      });
+
+      const filename = Object.keys(ExportedData).length === 1
+        ? Object.keys(ExportedData)[0]
+        : 'figma-export';
+
+      downloadMarkdownFile(markdownContent, filename);
+      toast.success("Markdown file downloaded");
+    } catch (error) {
+      toast.error("Failed to download file");
+      console.error(error);
+    }
+  };
+
+  const handleDownloadSeparate = async () => {
+    if (!ExportedData) return;
+
+    try {
+      const components = Object.entries(ExportedData).map(([name, data]) => ({
+        name,
+        markdown: convertToMarkdown({ [name]: data }, {
+          anatomyView,
+          includeTableOfContents: false,
+          componentName: name
+        })
+      }));
+
+      await downloadMultipleMarkdownFiles(components);
+      toast.success("Components downloaded as zip");
+    } catch (error) {
+      toast.error("Failed to download files");
+      console.error(error);
     }
   };
   
@@ -489,15 +544,35 @@ export default function App() {
             {output ? "Exportion Result" : "Ready to Export"}
           </div>
           <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               className="h-7 text-xs gap-1.5"
               disabled={!output}
               onClick={handleCopy}
             >
               <Copy className="w-3.5 h-3.5" /> Copy
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1.5"
+                  disabled={!ExportedData}
+                >
+                  <Download className="w-3.5 h-3.5" /> Download
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleDownloadFull}>
+                  Full Export (.md)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleDownloadSeparate}>
+                  Component-based (.zip)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 

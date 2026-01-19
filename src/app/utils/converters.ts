@@ -343,7 +343,7 @@ export const convertToTypeScript = (data: any) => {
 
 export const convertToJSDoc = (data: any) => {
   let result = '';
-  
+
   for (const componentName in data) {
     const component = data[componentName];
     const cleanName = componentName.replace(/\s+/g, '');
@@ -351,16 +351,16 @@ export const convertToJSDoc = (data: any) => {
     const anatomy = component.anatomy || {};
     const elementStyles = component.elementStyles || {};
     const tokens = component.tokens || {};
-    
+
     // Props JSDoc
     if (Object.keys(props).length > 0) {
       result += `/**\n`;
       result += ` * @typedef {Object} ${cleanName}Props\n`;
-      
+
       for (const propName in props) {
         const prop = props[propName];
         let typeString = '*';
-        
+
         if (prop.type === 'boolean') {
           typeString = 'boolean';
         } else if (prop.type === 'string') {
@@ -373,50 +373,190 @@ export const convertToJSDoc = (data: any) => {
         } else if (prop.type === 'number') {
           typeString = 'number';
         }
-        
+
         result += ` * @property {${typeString}} ${propName}\n`;
       }
-      
+
       result += ` */\n\n`;
     }
-    
+
     // Anatomy JSDoc
     if (Object.keys(anatomy).length > 0) {
       result += `/**\n`;
       result += ` * @typedef {Object} ${cleanName}Anatomy\n`;
-      
+
       for (const nodeName in anatomy) {
         const node = anatomy[nodeName];
         result += ` * @property {string} ${nodeName} - ${node.type} (${node.path})\n`;
       }
-      
+
       result += ` */\n\n`;
     }
-    
+
     // Styles JSDoc
     if (Object.keys(elementStyles).length > 0) {
       result += `/**\n`;
       result += ` * @typedef {Object} ${cleanName}Styles\n`;
-      
+
       for (const nodeName in elementStyles) {
         result += ` * @property {Object} ${nodeName}\n`;
       }
-      
+
       result += ` */\n\n`;
     }
-    
+
     // Tokens JSDoc
     if (Object.keys(tokens).length > 0) {
       result += `/**\n`;
       result += ` * @typedef {Object} ${cleanName}Tokens\n`;
-      
+
       for (const nodeName in tokens) {
         result += ` * @property {Object} ${nodeName}\n`;
       }
-      
+
       result += ` */\n\n`;
     }
   }
-  
+
+  return result;
+};
+
+export interface MarkdownOptions {
+  anatomyView: 'tree' | 'yaml';
+  includeTableOfContents: boolean;
+  componentName?: string;
+}
+
+/**
+ * Escape markdown special characters
+ */
+const escapeMarkdown = (text: string): string => {
+  return text.replace(/([\\`*_\[\]])/g, '\\$1');
+};
+
+/**
+ * Convert data to Markdown format
+ */
+export const convertToMarkdown = (data: any, options: MarkdownOptions): string => {
+  const { anatomyView, includeTableOfContents } = options;
+  let result = '';
+
+  const componentNames = Object.keys(data);
+
+  // Add table of contents if multiple components
+  if (includeTableOfContents && componentNames.length > 1) {
+    result += '# Table of Contents\n\n';
+    componentNames.forEach(name => {
+      const anchor = name.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
+      result += `- [${escapeMarkdown(name)}](#${anchor})\n`;
+    });
+    result += '\n---\n\n';
+  }
+
+  // Process each component
+  componentNames.forEach((componentName, index) => {
+    const component = data[componentName];
+    const props = component.props || {};
+    const anatomy = component.anatomy || {};
+    const elementStyles = component.elementStyles || {};
+    const tokens = component.tokens || {};
+
+    // Add separator between components
+    if (index > 0) {
+      result += '\n---\n\n';
+    }
+
+    // Component heading
+    result += `# ${escapeMarkdown(componentName)}\n\n`;
+
+    // Properties section
+    if (Object.keys(props).length > 0) {
+      result += '## Properties\n\n';
+      result += '| Name | Type | Default | Values |\n';
+      result += '|------|------|---------|--------|\n';
+
+      for (const propName in props) {
+        const prop = props[propName];
+        const type = prop.type || '-';
+        const defaultValue = prop.default !== undefined ? String(prop.default) : '-';
+        const values = prop.values ? prop.values.join(', ') : '-';
+
+        result += `| ${escapeMarkdown(propName)} | ${type} | ${escapeMarkdown(defaultValue)} | ${escapeMarkdown(values)} |\n`;
+      }
+
+      result += '\n';
+    } else {
+      result += '## Properties\n\n*No properties defined*\n\n';
+    }
+
+    // Anatomy section
+    if (Object.keys(anatomy).length > 0) {
+      result += '## Anatomy\n\n';
+
+      if (anatomyView === 'tree') {
+        // Use tree view
+        const treeOutput = convertAnatomyToTree(anatomy);
+        result += '```\n';
+        result += treeOutput;
+        result += '\n```\n\n';
+      } else {
+        // Use YAML view
+        const yamlOutput = convertToYAML(anatomy);
+        result += '```yaml\n';
+        result += yamlOutput;
+        result += '```\n\n';
+      }
+    } else {
+      result += '## Anatomy\n\n*No anatomy defined*\n\n';
+    }
+
+    // Element Styles section
+    if (Object.keys(elementStyles).length > 0) {
+      result += '## Element Styles\n\n';
+
+      for (const nodeName in elementStyles) {
+        const style = elementStyles[nodeName];
+        result += `### ${escapeMarkdown(nodeName)}\n\n`;
+
+        for (const styleKey in style) {
+          const value = style[styleKey];
+          const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+          result += `- **${styleKey}**: ${escapeMarkdown(displayValue)}\n`;
+        }
+
+        result += '\n';
+      }
+    } else {
+      result += '## Element Styles\n\n*No element styles defined*\n\n';
+    }
+
+    // Tokens section
+    if (Object.keys(tokens).length > 0) {
+      result += '## Tokens\n\n';
+
+      for (const category in tokens) {
+        const tokenList = tokens[category];
+
+        if (Array.isArray(tokenList) && tokenList.length > 0) {
+          result += `### ${escapeMarkdown(category)}\n\n`;
+
+          tokenList.forEach((token: any) => {
+            if (token.node && token.variableName) {
+              result += `- **${escapeMarkdown(token.node)}**: ${escapeMarkdown(token.variableName)}`;
+              if (token.property) {
+                result += ` (${escapeMarkdown(token.property)})`;
+              }
+              result += '\n';
+            }
+          });
+
+          result += '\n';
+        }
+      }
+    } else {
+      result += '## Tokens\n\n*No tokens defined*\n\n';
+    }
+  });
+
   return result;
 };
