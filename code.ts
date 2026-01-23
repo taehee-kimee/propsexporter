@@ -1,16 +1,20 @@
 // This is the main plugin code that runs in Figma's backend
 // It doesn't have access to the browser or DOM, only to the Figma API
 
+// Helper function to add timeout to async operations
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutError: string = 'Operation timed out'): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(timeoutError)), timeoutMs)
+    )
+  ]);
+}
+
 // Show the plugin UI window (larger size for two-column layout)
 figma.showUI(__html__, { width: 800, height: 600 });
 
-// Send loading state to UI
-figma.ui.postMessage({ type: 'loading', message: 'Loading components...' });
-
-// Load components in background
-(async () => {
-  await getAllComponents();
-})();
+// Components will be loaded when requested by the UI
 
 // Send initial selection state
 function sendSelectionUpdate() {
@@ -143,32 +147,11 @@ figma.on('selectionchange', () => {
   sendSelectionUpdate();
 });
 
-// Listen for document changes to notify UI (requires loadAllPagesAsync first)
-(async () => {
-  await figma.loadAllPagesAsync();
-
-  figma.on('documentchange', (event) => {
-    // Check if any component-related changes occurred
-    const hasComponentChanges = event.documentChanges.some(change =>
-      change.type === 'CREATE' ||
-      change.type === 'DELETE' ||
-      (change.type === 'PROPERTY_CHANGE' && change.properties.includes('name'))
-    );
-
-    if (hasComponentChanges) {
-      // Notify UI that components list may have changed
-      figma.ui.postMessage({
-        type: 'components-changed'
-      });
-    }
-  });
-})();
-
 // Listen for messages from the UI
 figma.ui.onmessage = async (msg) => {
   // When the UI asks to Export properties from current selection
   if (msg.type === 'Export-properties') {
-    ExportComponentProperties(msg.options);
+    await ExportComponentProperties(msg.options);
   }
   
   // When the UI asks to get all components in the file
@@ -178,14 +161,13 @@ figma.ui.onmessage = async (msg) => {
   
   // When the UI asks to refresh components (clear cache)
   if (msg.type === 'refresh-components') {
-    await figma.clientStorage.deleteAsync('componentsList');
-    await figma.clientStorage.deleteAsync('componentsHash');
+    await figma.clientStorage.deleteAsync('componentsCache');
     await getAllComponents(true);
   }
   
   // When the UI asks to Export multiple components
   if (msg.type === 'Export-multiple') {
-    ExportMultipleComponents(msg.componentIds, msg.options);
+    await ExportMultipleComponents(msg.componentIds, msg.options);
   }
   
   // When the UI asks to close the plugin
@@ -202,14 +184,17 @@ async function ExportComponentProperties(options: any) {
 
   // Get the currently selected node in Figma
   const selection = figma.currentPage.selection;
+  console.log('[ExportComponentProperties] Selection length:', selection.length);
 
   // Check if exactly one node is selected
   if (selection.length === 0) {
+    console.log('[ExportComponentProperties] No selection');
     sendError('Please select a component or component set.');
     return;
   }
 
   if (selection.length > 1) {
+    console.log('[ExportComponentProperties] Multiple selections');
     sendError('Please select only one component or component set.');
     return;
   }
@@ -222,20 +207,32 @@ async function ExportComponentProperties(options: any) {
     if (node.type === 'COMPONENT') {
       // Single component
       console.log('[ExportComponentProperties] Calling ExportFromComponent');
-      const result = await ExportFromComponent(node, options);
-      console.log('[ExportComponentProperties] Result:', JSON.stringify(result));
+      const result = await withTimeout(
+        ExportFromComponent(node, options),
+        30000,
+        'Export operation timed out after 30 seconds'
+      );
+      console.log('[ExportComponentProperties] ExportFromComponent completed');
+      console.log('[ExportComponentProperties] Result keys:', Object.keys(result));
       sendSuccess(result);
     } else if (node.type === 'COMPONENT_SET') {
       // Component set (variants)
       console.log('[ExportComponentProperties] Calling ExportFromComponentSet');
-      const result = await ExportFromComponentSet(node, options);
-      console.log('[ExportComponentProperties] Result:', JSON.stringify(result));
+      const result = await withTimeout(
+        ExportFromComponentSet(node, options),
+        30000,
+        'Export operation timed out after 30 seconds'
+      );
+      console.log('[ExportComponentProperties] ExportFromComponentSet completed');
+      console.log('[ExportComponentProperties] Result keys:', Object.keys(result));
       sendSuccess(result);
     } else {
+      console.log('[ExportComponentProperties] Invalid node type:', node.type);
       sendError('Selected node must be a Component or Component Set. You selected: ' + node.type);
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('[ExportComponentProperties] Error:', error);
+    console.error('[ExportComponentProperties] Error stack:', error.stack);
     sendError('Export failed: ' + String(error));
   }
 }
@@ -244,6 +241,7 @@ async function ExportComponentProperties(options: any) {
  * Export properties from a single Component
  */
 async function ExportFromComponent(component: ComponentNode, options: any) {
+  console.log('[ExportFromComponent] Starting for:', component.name);
   const componentName = component.name;
   const result: any = {
     [componentName]: {}
@@ -251,6 +249,7 @@ async function ExportFromComponent(component: ComponentNode, options: any) {
 
   // Export properties if selected
   if (options.property) {
+    console.log('[ExportFromComponent] Exporting properties');
     // Check if this is a variant component (child of ComponentSet)
     let propertyDefinitions;
     if (component.parent && component.parent.type === 'COMPONENT_SET') {
@@ -265,24 +264,32 @@ async function ExportFromComponent(component: ComponentNode, options: any) {
 
   // Export anatomy if selected
   if (options.anatomy) {
+    console.log('[ExportFromComponent] Exporting anatomy');
     result[componentName].anatomy = ExportAnatomy(component);
   }
 
   // Export element styles if selected
   if (options.elementStyles) {
+    console.log('[ExportFromComponent] Exporting element styles');
     result[componentName].elementStyles = await ExportElementStyles(component);
+    console.log('[ExportFromComponent] Element styles completed');
   }
 
   // Export figma styles if selected
   if (options.figmaStyles) {
+    console.log('[ExportFromComponent] Exporting figma styles');
     result[componentName].figmaStyles = await ExportFigmaStyles(component);
+    console.log('[ExportFromComponent] Figma styles completed');
   }
 
   // Export tokens if selected
   if (options.tokens) {
+    console.log('[ExportFromComponent] Exporting tokens');
     result[componentName].tokens = await ExportTokens(component);
+    console.log('[ExportFromComponent] Tokens completed');
   }
 
+  console.log('[ExportFromComponent] All exports completed');
   return result;
 }
 
@@ -466,9 +473,12 @@ function ExportAnatomy(node: ComponentNode | ComponentSetNode): any {
  * Export element styles (inline styles) from a component
  */
 async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Promise<any> {
+  console.log('[ExportElementStyles] Starting for node:', node.name);
   const styles: any = {};
+  let nodeCount = 0;
 
   async function getNodeStyles(n: SceneNode): Promise<any> {
+    console.log('[getNodeStyles] Processing node:', n.name, 'type:', n.type);
     const nodeStyles: any = {
       name: n.name,
       type: n.type
@@ -497,6 +507,7 @@ async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Prom
 
     // Export fill/stroke properties
     if ('fills' in n && Array.isArray(n.fills)) {
+      console.log('[getNodeStyles] Processing fills for:', n.name);
       // Check if fills are bound to a variable
       if (boundVariables && 'fills' in boundVariables && Array.isArray(boundVariables.fills)) {
         const fillTokens = [];
@@ -530,6 +541,7 @@ async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Prom
           return { type: fill.type };
         });
       }
+      console.log('[getNodeStyles] Fills processed for:', n.name);
     }
 
     if ('strokes' in n && Array.isArray(n.strokes)) {
@@ -547,6 +559,7 @@ async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Prom
 
     // Export text properties
     if (n.type === 'TEXT') {
+      console.log('[getNodeStyles] Processing text properties for:', n.name);
       const textNode = n as TextNode;
       nodeStyles.fontSize = await getValueOrToken('fontSize', textNode.fontSize);
       nodeStyles.fontName = textNode.fontName;
@@ -554,10 +567,12 @@ async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Prom
       nodeStyles.textAlignVertical = textNode.textAlignVertical;
       nodeStyles.letterSpacing = await getValueOrToken('letterSpacing', textNode.letterSpacing);
       nodeStyles.lineHeight = await getValueOrToken('lineHeight', textNode.lineHeight);
+      console.log('[getNodeStyles] Text properties processed for:', n.name);
     }
 
     // Export layout properties
     if ('layoutMode' in n) {
+      console.log('[getNodeStyles] Processing layout properties for:', n.name);
       nodeStyles.layoutMode = n.layoutMode;
       nodeStyles.primaryAxisAlignItems = n.primaryAxisAlignItems;
       nodeStyles.counterAxisAlignItems = n.counterAxisAlignItems;
@@ -566,9 +581,11 @@ async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Prom
       nodeStyles.paddingTop = await getValueOrToken('paddingTop', n.paddingTop);
       nodeStyles.paddingBottom = await getValueOrToken('paddingBottom', n.paddingBottom);
       nodeStyles.itemSpacing = await getValueOrToken('itemSpacing', n.itemSpacing);
+      console.log('[getNodeStyles] Layout properties processed for:', n.name);
     }
 
     // Export size properties
+    console.log('[getNodeStyles] Processing size properties for:', n.name);
     nodeStyles.width = await getValueOrToken('width', n.width);
     nodeStyles.height = await getValueOrToken('height', n.height);
 
@@ -577,35 +594,45 @@ async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Prom
       nodeStyles.cornerRadius = await getValueOrToken('cornerRadius', n.cornerRadius);
     }
 
+    console.log('[getNodeStyles] Completed for:', n.name);
     return nodeStyles;
   }
 
   async function traverseForStyles(n: SceneNode) {
+    nodeCount++;
+    console.log('[traverseForStyles] Node', nodeCount, ':', n.name);
     styles[n.name] = await getNodeStyles(n);
+    console.log('[traverseForStyles] Completed getNodeStyles for:', n.name);
 
     // If node has children, traverse them
     if ('children' in n) {
+      console.log('[traverseForStyles] Node has', n.children.length, 'children');
       for (const child of n.children) {
         await traverseForStyles(child);
       }
     }
+    console.log('[traverseForStyles] Finished traversing:', n.name);
   }
 
   // For ComponentSet, get the first variant
   if (node.type === 'COMPONENT_SET' && node.children.length > 0) {
+    console.log('[ExportElementStyles] Processing COMPONENT_SET, first variant');
     const firstVariant = node.children[0];
     if ('children' in firstVariant) {
+      console.log('[ExportElementStyles] First variant has', firstVariant.children.length, 'children');
       for (const child of firstVariant.children) {
         await traverseForStyles(child);
       }
     }
   } else if ('children' in node) {
     // For regular Component, traverse its children
+    console.log('[ExportElementStyles] Processing regular COMPONENT with', node.children.length, 'children');
     for (const child of node.children) {
       await traverseForStyles(child);
     }
   }
 
+  console.log('[ExportElementStyles] Completed, processed', nodeCount, 'nodes');
   return styles;
 }
 
@@ -622,64 +649,103 @@ async function ExportFigmaStyles(node: ComponentNode | ComponentSetNode): Promis
   };
 
   async function collectStyles(n: SceneNode) {
-    console.log('[collectStyles] Processing node:', n.name, 'type:', n.type);
+    try {
+      console.log('[collectStyles] Processing node:', n.name, 'type:', n.type);
 
-    // Collect fill style (check for string type to avoid figma.mixed symbol)
-    if ('fillStyleId' in n) {
-      console.log('[collectStyles] fillStyleId:', n.fillStyleId, 'type:', typeof n.fillStyleId);
-    }
-    if ('fillStyleId' in n && typeof n.fillStyleId === 'string' && n.fillStyleId !== '') {
-      const style = await figma.getStyleByIdAsync(n.fillStyleId);
-      console.log('[collectStyles] Got fill style:', style?.name || 'null');
-      if (style) {
-        figmaStyles.fillStyles.push({
-          node: n.name,
-          styleName: style.name
-        });
-      }
-    }
-
-    // Collect stroke style
-    if ('strokeStyleId' in n && typeof n.strokeStyleId === 'string' && n.strokeStyleId !== '') {
-      const style = await figma.getStyleByIdAsync(n.strokeStyleId);
-      if (style) {
-        figmaStyles.strokeStyles.push({
-          node: n.name,
-          styleName: style.name
-        });
-      }
-    }
-
-    // Collect text style
-    if (n.type === 'TEXT') {
-      const textNode = n as TextNode;
-      if (typeof textNode.textStyleId === 'string' && textNode.textStyleId !== '') {
-        const style = await figma.getStyleByIdAsync(textNode.textStyleId);
-        if (style) {
-          figmaStyles.textStyles.push({
-            node: n.name,
-            styleName: style.name
-          });
+      // Collect fill style (check for string type to avoid figma.mixed symbol)
+      if ('fillStyleId' in n) {
+        console.log('[collectStyles] fillStyleId:', n.fillStyleId, 'type:', typeof n.fillStyleId);
+        const fillStyleId = (n as any).fillStyleId;
+        if (fillStyleId !== figma.mixed && typeof fillStyleId === 'string' && fillStyleId !== '') {
+          try {
+            const style = await figma.getStyleByIdAsync(fillStyleId);
+            console.log('[collectStyles] Got fill style:', style?.name || 'null');
+            if (style) {
+              figmaStyles.fillStyles.push({
+                node: n.name,
+                styleName: style.name
+              });
+            }
+          } catch (e) {
+            console.log('[collectStyles] Error fetching fill style:', e);
+          }
         }
       }
-    }
 
-    // Collect effect style
-    if ('effectStyleId' in n && typeof n.effectStyleId === 'string' && n.effectStyleId !== '') {
-      const style = await figma.getStyleByIdAsync(n.effectStyleId);
-      if (style) {
-        figmaStyles.effectStyles.push({
-          node: n.name,
-          styleName: style.name
-        });
+      // Collect stroke style
+      if ('strokeStyleId' in n) {
+        const strokeStyleId = (n as any).strokeStyleId;
+        if (strokeStyleId !== figma.mixed && typeof strokeStyleId === 'string' && strokeStyleId !== '') {
+          try {
+            const style = await figma.getStyleByIdAsync(strokeStyleId);
+            if (style) {
+              figmaStyles.strokeStyles.push({
+                node: n.name,
+                styleName: style.name
+              });
+            }
+          } catch (e) {
+            console.log('[collectStyles] Error fetching stroke style:', e);
+          }
+        }
       }
-    }
 
-    // Traverse children
-    if ('children' in n) {
-      for (const child of n.children) {
-        await collectStyles(child);
+      // Collect text style
+      if (n.type === 'TEXT') {
+        console.log('[collectStyles] Processing TEXT node');
+        const textNode = n as TextNode;
+        const textStyleId = textNode.textStyleId;
+        console.log('[collectStyles] textStyleId:', textStyleId, 'type:', typeof textStyleId, 'isMixed:', textStyleId === figma.mixed);
+        
+        if (textStyleId !== figma.mixed && typeof textStyleId === 'string' && textStyleId !== '') {
+          try {
+            console.log('[collectStyles] Fetching text style...');
+            const style = await figma.getStyleByIdAsync(textStyleId);
+            console.log('[collectStyles] Got text style:', style?.name || 'null');
+            if (style) {
+              figmaStyles.textStyles.push({
+                node: n.name,
+                styleName: style.name
+              });
+            }
+          } catch (e) {
+            console.log('[collectStyles] Error fetching text style:', e);
+          }
+        } else {
+          console.log('[collectStyles] Skipping textStyleId (mixed or empty)');
+        }
       }
+
+      // Collect effect style
+      if ('effectStyleId' in n) {
+        console.log('[collectStyles] Checking effect style');
+        const effectStyleId = (n as any).effectStyleId;
+        if (effectStyleId !== figma.mixed && typeof effectStyleId === 'string' && effectStyleId !== '') {
+          try {
+            const style = await figma.getStyleByIdAsync(effectStyleId);
+            if (style) {
+              figmaStyles.effectStyles.push({
+                node: n.name,
+                styleName: style.name
+              });
+            }
+          } catch (e) {
+            console.log('[collectStyles] Error fetching effect style:', e);
+          }
+        }
+      }
+
+      // Traverse children
+      if ('children' in n) {
+        console.log('[collectStyles] Traversing', n.children.length, 'children');
+        for (const child of n.children) {
+          await collectStyles(child);
+        }
+      }
+      
+      console.log('[collectStyles] Completed for:', n.name);
+    } catch (error) {
+      console.error('[collectStyles] Error processing node:', n.name, error);
     }
   }
 
@@ -705,6 +771,7 @@ async function ExportFigmaStyles(node: ComponentNode | ComponentSetNode): Promis
   if (figmaStyles.textStyles.length > 0) result.textStyles = figmaStyles.textStyles;
   if (figmaStyles.effectStyles.length > 0) result.effectStyles = figmaStyles.effectStyles;
 
+  console.log('[ExportFigmaStyles] Completed');
   console.log('[ExportFigmaStyles] Result:', JSON.stringify(result));
   return result;
 }
@@ -723,89 +790,113 @@ async function ExportTokens(node: ComponentNode | ComponentSetNode): Promise<any
   };
 
   async function collectTokens(n: SceneNode) {
-    console.log('[collectTokens] Processing node:', n.name);
-    // Collect bound variables
-    const boundVariables = n.boundVariables;
-    console.log('[collectTokens] boundVariables:', boundVariables ? Object.keys(boundVariables) : 'none');
+    try {
+      console.log('[collectTokens] Processing node:', n.name);
+      // Collect bound variables
+      const boundVariables = n.boundVariables;
+      console.log('[collectTokens] boundVariables:', boundVariables ? Object.keys(boundVariables) : 'none');
 
-    if (boundVariables) {
-      // Check fills
-      if ('fills' in boundVariables && Array.isArray(boundVariables.fills)) {
-        console.log('[collectTokens] Found fills variables:', boundVariables.fills.length);
-        for (const fillVar of boundVariables.fills) {
-          if (fillVar && 'id' in fillVar) {
-            try {
-              console.log('[collectTokens] Getting variable by id:', fillVar.id);
-              const variable = await figma.variables.getVariableByIdAsync(fillVar.id);
-              console.log('[collectTokens] Got variable:', variable?.name || 'null');
-              if (variable) {
-                tokens.colors.push({
-                  node: n.name,
-                  variableName: variable.name
-                });
+      if (boundVariables) {
+        // Check fills
+        if ('fills' in boundVariables && Array.isArray(boundVariables.fills)) {
+          console.log('[collectTokens] Found fills variables:', boundVariables.fills.length);
+          for (const fillVar of boundVariables.fills) {
+            if (fillVar && 'id' in fillVar) {
+              try {
+                console.log('[collectTokens] Getting variable by id:', fillVar.id);
+                const variable = await withTimeout(
+                  figma.variables.getVariableByIdAsync(fillVar.id),
+                  5000,
+                  'Variable fetch timeout'
+                );
+                console.log('[collectTokens] Got variable:', variable?.name || 'null');
+                if (variable) {
+                  tokens.colors.push({
+                    node: n.name,
+                    variableName: variable.name
+                  });
+                }
+              } catch (e) {
+                console.log('[collectTokens] Error getting variable:', e);
               }
-            } catch (e) {
-              console.log('[collectTokens] Error getting variable:', e);
+            }
+          }
+          console.log('[collectTokens] Finished processing fills variables');
+        }
+
+        // Check other properties that might have variables
+        console.log('[collectTokens] Checking other property mappings');
+        const propertyMappings = [
+          { prop: 'itemSpacing', category: 'spacing' },
+          { prop: 'paddingLeft', category: 'spacing' },
+          { prop: 'paddingRight', category: 'spacing' },
+          { prop: 'paddingTop', category: 'spacing' },
+          { prop: 'paddingBottom', category: 'spacing' },
+          { prop: 'width', category: 'sizing' },
+          { prop: 'height', category: 'sizing' },
+          { prop: 'cornerRadius', category: 'sizing' }
+        ];
+
+        for (const mapping of propertyMappings) {
+          if (mapping.prop in boundVariables) {
+            const varRef = (boundVariables as any)[mapping.prop];
+            if (varRef && 'id' in varRef) {
+              try {
+                const variable = await withTimeout(
+                  figma.variables.getVariableByIdAsync(varRef.id),
+                  5000,
+                  'Variable fetch timeout'
+                );
+                if (variable) {
+                  tokens[mapping.category].push({
+                    node: n.name,
+                    property: mapping.prop,
+                    variableName: variable.name
+                  });
+                }
+              } catch (e) {
+                console.log('[collectTokens] Error getting variable for', mapping.prop, ':', e);
+              }
             }
           }
         }
+        console.log('[collectTokens] Finished checking property mappings');
       }
 
-      // Check other properties that might have variables
-      const propertyMappings = [
-        { prop: 'itemSpacing', category: 'spacing' },
-        { prop: 'paddingLeft', category: 'spacing' },
-        { prop: 'paddingRight', category: 'spacing' },
-        { prop: 'paddingTop', category: 'spacing' },
-        { prop: 'paddingBottom', category: 'spacing' },
-        { prop: 'width', category: 'sizing' },
-        { prop: 'height', category: 'sizing' },
-        { prop: 'cornerRadius', category: 'sizing' }
-      ];
-
-      for (const mapping of propertyMappings) {
-        if (mapping.prop in boundVariables) {
-          const varRef = (boundVariables as any)[mapping.prop];
-          if (varRef && 'id' in varRef) {
-            try {
-              const variable = await figma.variables.getVariableByIdAsync(varRef.id);
-              if (variable) {
-                tokens[mapping.category].push({
-                  node: n.name,
-                  property: mapping.prop,
-                  variableName: variable.name
-                });
-              }
-            } catch (e) {
-              // Variable might not exist
-            }
-          }
+      // Traverse children
+      if ('children' in n) {
+        console.log('[collectTokens] Node has', n.children.length, 'children');
+        for (const child of n.children) {
+          await collectTokens(child);
         }
+        console.log('[collectTokens] Finished traversing children of:', n.name);
       }
-    }
-
-    // Traverse children
-    if ('children' in n) {
-      for (const child of n.children) {
-        await collectTokens(child);
-      }
+      
+      console.log('[collectTokens] Completed for:', n.name);
+    } catch (error) {
+      console.error('[collectTokens] Error processing node:', n.name, error);
     }
   }
 
   // For ComponentSet, get the first variant
   if (node.type === 'COMPONENT_SET' && node.children.length > 0) {
+    console.log('[ExportTokens] Processing COMPONENT_SET, first variant');
     const firstVariant = node.children[0];
     if ('children' in firstVariant) {
+      console.log('[ExportTokens] First variant has', firstVariant.children.length, 'children');
       for (const child of firstVariant.children) {
         await collectTokens(child);
       }
     }
   } else if ('children' in node) {
     // For regular Component, traverse its children
+    console.log('[ExportTokens] Processing regular COMPONENT with', node.children.length, 'children');
     for (const child of node.children) {
       await collectTokens(child);
     }
   }
+
+  console.log('[ExportTokens] Finished collecting tokens');
 
   // Remove empty arrays
   const result: any = {};
@@ -815,6 +906,8 @@ async function ExportTokens(node: ComponentNode | ComponentSetNode): Promise<any
   if (tokens.typography.length > 0) result.typography = tokens.typography;
   if (tokens.other.length > 0) result.other = tokens.other;
 
+  console.log('[ExportTokens] Completed');
+  console.log('[ExportTokens] Result:', JSON.stringify(result));
   return result;
 }
 
@@ -859,37 +952,50 @@ async function getComponentsHash(): Promise<string> {
  */
 async function getAllComponents(forceRefresh: boolean = false) {
   try {
+    // Load all pages first (required for accessing page children)
+    await figma.loadAllPagesAsync();
+    
+    const fileKey = figma.fileKey || 'unknown';
+    
     // Check cache first (unless force refresh)
     if (!forceRefresh) {
-      const cached = await figma.clientStorage.getAsync('componentsList');
-      const cachedHash = await figma.clientStorage.getAsync('componentsHash');
-      
-      // Quick check: if we have cached data, send it first, then verify in background
-      if (cached && cachedHash) {
-        console.log('Sending cached components, verifying freshness...');
+      try {
+        const cachedData = await figma.clientStorage.getAsync('componentsCache');
         
-        // Send cached data immediately
-        figma.ui.postMessage({
-          type: 'components-list',
-          components: cached,
-          fromCache: false
-        });
-        
-        // Verify if components have changed by doing a quick scan
-        const quickScan = await getComponentsHash();
-        
-        if (quickScan !== cachedHash) {
-          console.log('Components have changed, prompting refresh');
-          // Components changed, update cache and notify UI
+        // Verify cached data structure and file match
+        if (cachedData && 
+            cachedData.fileKey === fileKey && 
+            Array.isArray(cachedData.components)) {
+          
+          console.log('[getAllComponents] Found cached data for this file');
+          
+          // Send cached data immediately
           figma.ui.postMessage({
             type: 'components-list',
-            components: cached,
-            fromCache: true // Show refresh button
+            components: cachedData.components,
+            fromCache: false
           });
+          
+          // Verify if components have changed by doing a quick scan
+          const currentHash = await getComponentsHash();
+          
+          if (currentHash !== cachedData.hash) {
+            console.log('[getAllComponents] Components have changed, prompting refresh');
+            // Components changed, notify UI to show refresh button
+            figma.ui.postMessage({
+              type: 'components-list',
+              components: cachedData.components,
+              fromCache: true // Show refresh button
+            });
+          } else {
+            console.log('[getAllComponents] Components unchanged');
+            return;
+          }
         } else {
-          console.log('Components unchanged');
-          return;
+          console.log('[getAllComponents] No valid cache found or different file');
         }
+      } catch (error) {
+        console.error('[getAllComponents] Error loading cache:', error);
       }
     }
     
@@ -938,10 +1044,19 @@ async function getAllComponents(forceRefresh: boolean = false) {
       findComponents(page);
     }
     
-    // Save to cache with components hash
+    // Save to cache with file key and hash
     const componentsHash = await getComponentsHash();
-    await figma.clientStorage.setAsync('componentsList', components);
-    await figma.clientStorage.setAsync('componentsHash', componentsHash);
+    
+    try {
+      await figma.clientStorage.setAsync('componentsCache', {
+        fileKey,
+        hash: componentsHash,
+        components
+      });
+      console.log('[getAllComponents] Saved', components.length, 'components to cache');
+    } catch (error) {
+      console.error('[getAllComponents] Failed to save cache:', error);
+    }
     
     // Send the list to UI
     figma.ui.postMessage({
@@ -962,28 +1077,41 @@ async function getAllComponents(forceRefresh: boolean = false) {
  * Export multiple components by their IDs
  */
 async function ExportMultipleComponents(componentIds: string[], options: any) {
-  const results: any = {};
+  try {
+    const results: any = {};
 
-  for (const id of componentIds) {
-    const node = figma.getNodeById(id);
+    for (const id of componentIds) {
+      const node = await figma.getNodeByIdAsync(id);
 
-    if (!node) {
-      continue;
+      if (!node) {
+        continue;
+      }
+
+      if (node.type === 'COMPONENT') {
+        const result = await withTimeout(
+          ExportFromComponent(node as ComponentNode, options),
+          30000,
+          `Export timeout for component: ${node.name}`
+        );
+        Object.assign(results, result);
+      } else if (node.type === 'COMPONENT_SET') {
+        const result = await withTimeout(
+          ExportFromComponentSet(node as ComponentSetNode, options),
+          30000,
+          `Export timeout for component set: ${node.name}`
+        );
+        Object.assign(results, result);
+      }
     }
 
-    if (node.type === 'COMPONENT') {
-      const result = await ExportFromComponent(node as ComponentNode, options);
-      Object.assign(results, result);
-    } else if (node.type === 'COMPONENT_SET') {
-      const result = await ExportFromComponentSet(node as ComponentSetNode, options);
-      Object.assign(results, result);
+    if (Object.keys(results).length === 0) {
+      sendError('No valid components found to Export.');
+    } else {
+      sendSuccess(results);
     }
-  }
-
-  if (Object.keys(results).length === 0) {
-    sendError('No valid components found to Export.');
-  } else {
-    sendSuccess(results);
+  } catch (error: any) {
+    console.error('[ExportMultipleComponents] Error:', error);
+    sendError('Export failed: ' + String(error));
   }
 }
 
@@ -991,16 +1119,20 @@ async function ExportMultipleComponents(componentIds: string[], options: any) {
  * Send success message with JSON result to the UI
  */
 function sendSuccess(result: any) {
+  console.log('[sendSuccess] Sending success message to UI');
+  console.log('[sendSuccess] Data keys:', Object.keys(result));
   figma.ui.postMessage({
     type: 'Exportion-result',
     data: result
   });
+  console.log('[sendSuccess] Message sent');
 }
 
 /**
  * Send error message to the UI
  */
 function sendError(message: string) {
+  console.log('[sendError] Sending error to UI:', message);
   figma.ui.postMessage({
     type: 'error',
     message: message

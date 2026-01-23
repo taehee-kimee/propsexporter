@@ -63,6 +63,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('selection');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedComponentIds, setSelectedComponentIds] = useState<Set<string>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number>(-1);
   const [isExporting, setIsExporting] = useState(false);
   const [output, setOutput] = useState('');
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('yaml');
@@ -200,14 +201,39 @@ export default function App() {
   }, [ExportedData, outputFormat, anatomyView, options.anatomy]);
 
   // Handlers
-  const toggleComponentSelection = (id: string) => {
-    const newSet = new Set(selectedComponentIds);
-    if (newSet.has(id)) {
-      newSet.delete(id);
+  const toggleComponentSelection = (id: string, index: number, event?: React.MouseEvent) => {
+    if (event?.shiftKey && lastSelectedIndex !== -1) {
+      // Shift + Click: 범위 선택
+      const start = Math.min(lastSelectedIndex, index);
+      const end = Math.max(lastSelectedIndex, index);
+      const rangeIds = filteredComponents
+        .slice(start, end + 1)
+        .map(comp => comp.id);
+      
+      const newSet = new Set(selectedComponentIds);
+      rangeIds.forEach(rangeId => newSet.add(rangeId));
+      setSelectedComponentIds(newSet);
+    } else if (event?.ctrlKey || event?.metaKey) {
+      // Ctrl/Cmd + Click: 토글 선택
+      const newSet = new Set(selectedComponentIds);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      setSelectedComponentIds(newSet);
+      setLastSelectedIndex(index);
     } else {
-      newSet.add(id);
+      // 일반 클릭: 체크박스 토글
+      const newSet = new Set(selectedComponentIds);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      setSelectedComponentIds(newSet);
+      setLastSelectedIndex(index);
     }
-    setSelectedComponentIds(newSet);
   };
 
   const handleOptionChange = (key: keyof typeof options) => {
@@ -381,26 +407,30 @@ export default function App() {
 
               <TabsContent value="browse" className="h-full m-0 flex flex-col absolute inset-0 overflow-hidden">
                 <div className="pt-2 px-4 pb-2 space-y-2 shrink-0">
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input 
-                      placeholder="Search components..." 
-                      className="pl-9 bg-white"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                      <Input 
+                        placeholder="Search components..." 
+                        className="pl-9 bg-white"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className={`w-9 h-9 shrink-0 ${fromCache && !isLoadingComponents ? 'bg-yellow-50 border-yellow-300 hover:bg-yellow-100' : ''}`}
+                      onClick={handleRefreshComponents}
+                      disabled={isLoadingComponents}
+                      title={isLoadingComponents ? 'Refreshing...' : 'Refresh component list'}
+                    >
+                      <RefreshCcw className={`w-4 h-4 ${isLoadingComponents ? 'animate-spin' : ''}`} />
+                    </Button>
                   </div>
                   {fromCache && !isLoadingComponents && (
-                    <div className="flex items-center justify-between gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded-md">
-                      <p className="text-xs text-yellow-700 flex-1">Showing cached data</p>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 text-xs gap-1 text-yellow-700 hover:text-yellow-800 hover:bg-yellow-100"
-                        onClick={handleRefreshComponents}
-                      >
-                        <RefreshCcw className="w-3 h-3" /> Refresh
-                      </Button>
+                    <div className="flex items-center gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded-md">
+                      <p className="text-xs text-yellow-700 flex-1">Components have changed since last load</p>
                     </div>
                   )}
                 </div>
@@ -415,7 +445,7 @@ export default function App() {
                     <ScrollArea className="h-full">
                       <div className="pb-4 space-y-1 pr-2">
                         {filteredComponents.length > 0 ? (
-                          filteredComponents.map(comp => (
+                          filteredComponents.map((comp, index) => (
                             <div 
                               key={comp.id}
                               className={`flex items-center gap-2 p-2 rounded-md transition-colors cursor-pointer border ${
@@ -423,11 +453,21 @@ export default function App() {
                                   ? 'bg-blue-50 border-blue-200' 
                                   : 'hover:bg-slate-100 border-transparent'
                               }`}
-                              onClick={() => toggleComponentSelection(comp.id)}
+                              onClick={(e) => toggleComponentSelection(comp.id, index, e)}
                             >
                               <Checkbox 
                                 checked={selectedComponentIds.has(comp.id)}
-                                onCheckedChange={() => toggleComponentSelection(comp.id)}
+                                onCheckedChange={(checked) => {
+                                  const newSet = new Set(selectedComponentIds);
+                                  if (checked) {
+                                    newSet.add(comp.id);
+                                  } else {
+                                    newSet.delete(comp.id);
+                                  }
+                                  setSelectedComponentIds(newSet);
+                                  setLastSelectedIndex(index);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
                                 className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 shrink-0"
                               />
                               <div className="flex-1 min-w-0 overflow-hidden">
