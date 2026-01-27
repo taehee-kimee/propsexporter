@@ -4,9 +4,9 @@
   "description": "A Figma plugin that Exports component properties to JSON",
   "main": "code.js",
   "scripts": {
-    "build": "tsc && vite build",
-    "watch": "tsc --watch",
-    "dev": "vite build --watch"
+    "build": "node ./node_modules/typescript/bin/tsc && node ./node_modules/vite/bin/vite.js build",
+    "watch": "node ./node_modules/typescript/bin/tsc --watch",
+    "dev": "node ./node_modules/vite/bin/vite.js build --watch"
   },
   "author": "",
   "license": "MIT",

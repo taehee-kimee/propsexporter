@@ -57,8 +57,6 @@ type OutputFormat = 'json' | 'yaml' | 'typescript' | 'jsdoc';
 type AnatomyView = 'yaml' | 'tree';
 
 export default function App() {
-  console.log("App component rendering...");
-  
   // State
   const [activeTab, setActiveTab] = useState<string>('selection');
   const [searchQuery, setSearchQuery] = useState('');
@@ -277,30 +275,13 @@ export default function App() {
     }
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!output) return;
 
     try {
-      // Create a temporary textarea element
-      const textarea = document.createElement('textarea');
-      textarea.value = output;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-
-      // Select and copy the text
-      textarea.select();
-      textarea.setSelectionRange(0, textarea.value.length);
-      const successful = document.execCommand('copy');
-
-      // Remove the temporary element
-      document.body.removeChild(textarea);
-
-      if (successful) {
-        toast.success("Copied to clipboard");
-      } else {
-        toast.error("Failed to copy");
-      }
+      // Prefer Clipboard API (no DOM manipulation)
+      await navigator.clipboard.writeText(output);
+      toast.success("Copied to clipboard");
     } catch (error) {
       toast.error("Failed to copy");
     }

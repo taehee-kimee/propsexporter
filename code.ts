@@ -1118,14 +1118,46 @@ async function ExportMultipleComponents(componentIds: string[], options: any) {
 /**
  * Send success message with JSON result to the UI
  */
-function sendSuccess(result: any) {
-  console.log('[sendSuccess] Sending success message to UI');
-  console.log('[sendSuccess] Data keys:', Object.keys(result));
+function sanitizeForPostMessage(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+  // Figma uses `figma.mixed` (a Symbol) for "mixed values" (e.g. text styles)
+  // Symbols/functions cannot be sent via postMessage (structured clone), so normalize them.
+  if (value === figma.mixed) return 'mixed';
+
+  // Any Symbol (including `figma.mixed`) is not postMessage-cloneable.
+  if (typeof value === 'symbol') return 'mixed';
+  if (typeof value === 'function') return '[Function]';
+
+  const valueType = typeof value;
+
+  if (value == null) return value;
+
+  if (Array.isArray(value)) {
+    return value.map((v) => sanitizeForPostMessage(v, seen));
+  }
+
+  if (value instanceof Date) return value.toISOString();
+
+  if (valueType === 'object') {
+    const obj = value as Record<string, unknown>;
+    if (seen.has(obj)) return '[Circular]';
+    seen.add(obj);
+
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = sanitizeForPostMessage(v, seen);
+    }
+    return out;
+  }
+
+  return value;
+}
+
+function sendSuccess(result: unknown) {
+  const safeResult = sanitizeForPostMessage(result);
   figma.ui.postMessage({
     type: 'Exportion-result',
-    data: result
+    data: safeResult
   });
-  console.log('[sendSuccess] Message sent');
 }
 
 /**
