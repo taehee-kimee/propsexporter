@@ -489,6 +489,10 @@ async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Prom
 
     // Helper function to get token name or actual value
     async function getValueOrToken(propertyName: string, actualValue: any): Promise<any> {
+      if (actualValue === figma.mixed) {
+        return 'mixed';
+      }
+      
       if (boundVariables && propertyName in boundVariables) {
         const varRef = (boundVariables as any)[propertyName];
         if (varRef && 'id' in varRef) {
@@ -562,7 +566,14 @@ async function ExportElementStyles(node: ComponentNode | ComponentSetNode): Prom
       console.log('[getNodeStyles] Processing text properties for:', n.name);
       const textNode = n as TextNode;
       nodeStyles.fontSize = await getValueOrToken('fontSize', textNode.fontSize);
-      nodeStyles.fontName = textNode.fontName;
+      
+      const fontName = textNode.fontName;
+      if (fontName === figma.mixed) {
+        nodeStyles.fontName = 'mixed';
+      } else {
+        nodeStyles.fontName = fontName;
+      }
+      
       nodeStyles.textAlignHorizontal = textNode.textAlignHorizontal;
       nodeStyles.textAlignVertical = textNode.textAlignVertical;
       nodeStyles.letterSpacing = await getValueOrToken('letterSpacing', textNode.letterSpacing);
