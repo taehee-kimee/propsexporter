@@ -449,65 +449,87 @@ async function ExportElementStyles(node) {
             return actualValue;
         }
         // Export fill/stroke properties
-        if ('fills' in n && Array.isArray(n.fills)) {
-            console.log('[getNodeStyles] Processing fills for:', n.name);
-            // Check if fills are bound to a variable
-            if (boundVariables && 'fills' in boundVariables && Array.isArray(boundVariables.fills)) {
-                const fillTokens = [];
-                for (const fillVar of boundVariables.fills) {
-                    if (fillVar && 'id' in fillVar) {
-                        try {
-                            const variable = await figma.variables.getVariableByIdAsync(fillVar.id);
-                            if (variable) {
-                                fillTokens.push(`$${variable.name}`);
+        // Check if fills exist and are not mixed (figma.mixed is a Symbol)
+        // Note: Using 'as unknown' because TypeScript types don't fully reflect runtime mixed values
+        if ('fills' in n) {
+            const fills = n.fills;
+            if (fills !== figma.mixed && Array.isArray(fills)) {
+                console.log('[getNodeStyles] Processing fills for:', n.name);
+                // Check if fills are bound to a variable
+                if (boundVariables && 'fills' in boundVariables && Array.isArray(boundVariables.fills)) {
+                    const fillTokens = [];
+                    for (const fillVar of boundVariables.fills) {
+                        if (fillVar && 'id' in fillVar) {
+                            try {
+                                const variable = await figma.variables.getVariableByIdAsync(fillVar.id);
+                                if (variable) {
+                                    fillTokens.push(`$${variable.name}`);
+                                }
+                            }
+                            catch (e) {
+                                // Variable might not exist
                             }
                         }
-                        catch (e) {
-                            // Variable might not exist
-                        }
+                    }
+                    if (fillTokens.length > 0) {
+                        nodeStyles.fills = fillTokens;
                     }
                 }
-                if (fillTokens.length > 0) {
-                    nodeStyles.fills = fillTokens;
+                // If no token found, use actual values
+                if (!nodeStyles.fills) {
+                    nodeStyles.fills = fills.map(fill => {
+                        if (fill.type === 'SOLID') {
+                            return {
+                                type: 'SOLID',
+                                color: fill.color,
+                                opacity: fill.opacity
+                            };
+                        }
+                        return { type: fill.type };
+                    });
                 }
+                console.log('[getNodeStyles] Fills processed for:', n.name);
             }
-            // If no token found, use actual values
-            if (!nodeStyles.fills) {
-                nodeStyles.fills = n.fills.map(fill => {
-                    if (fill.type === 'SOLID') {
+            else if (fills === figma.mixed) {
+                nodeStyles.fills = 'mixed';
+            }
+        }
+        if ('strokes' in n) {
+            const strokes = n.strokes;
+            if (strokes !== figma.mixed && Array.isArray(strokes)) {
+                nodeStyles.strokes = strokes.map(stroke => {
+                    if (stroke.type === 'SOLID') {
                         return {
                             type: 'SOLID',
-                            color: fill.color,
-                            opacity: fill.opacity
+                            color: stroke.color,
+                            opacity: stroke.opacity
                         };
                     }
-                    return { type: fill.type };
+                    return { type: stroke.type };
                 });
             }
-            console.log('[getNodeStyles] Fills processed for:', n.name);
-        }
-        if ('strokes' in n && Array.isArray(n.strokes)) {
-            nodeStyles.strokes = n.strokes.map(stroke => {
-                if (stroke.type === 'SOLID') {
-                    return {
-                        type: 'SOLID',
-                        color: stroke.color,
-                        opacity: stroke.opacity
-                    };
-                }
-                return { type: stroke.type };
-            });
+            else if (strokes === figma.mixed) {
+                nodeStyles.strokes = 'mixed';
+            }
         }
         // Export text properties
         if (n.type === 'TEXT') {
             console.log('[getNodeStyles] Processing text properties for:', n.name);
             const textNode = n;
-            nodeStyles.fontSize = await getValueOrToken('fontSize', textNode.fontSize);
-            nodeStyles.fontName = textNode.fontName;
-            nodeStyles.textAlignHorizontal = textNode.textAlignHorizontal;
-            nodeStyles.textAlignVertical = textNode.textAlignVertical;
-            nodeStyles.letterSpacing = await getValueOrToken('letterSpacing', textNode.letterSpacing);
-            nodeStyles.lineHeight = await getValueOrToken('lineHeight', textNode.lineHeight);
+            // Handle mixed values - figma.mixed is a Symbol that cannot be serialized
+            // Note: Using 'as unknown' because TypeScript types don't fully reflect runtime mixed values
+            const fontSize = textNode.fontSize;
+            nodeStyles.fontSize = fontSize === figma.mixed ? 'mixed' : await getValueOrToken('fontSize', fontSize);
+            const fontName = textNode.fontName;
+            nodeStyles.fontName = fontName === figma.mixed ? 'mixed' : fontName;
+            const textAlignH = textNode.textAlignHorizontal;
+            nodeStyles.textAlignHorizontal = textAlignH === figma.mixed ? 'mixed' : textAlignH;
+            const textAlignV = textNode.textAlignVertical;
+            nodeStyles.textAlignVertical = textAlignV === figma.mixed ? 'mixed' : textAlignV;
+            const letterSpacing = textNode.letterSpacing;
+            nodeStyles.letterSpacing = letterSpacing === figma.mixed ? 'mixed' : await getValueOrToken('letterSpacing', letterSpacing);
+            const lineHeight = textNode.lineHeight;
+            nodeStyles.lineHeight = lineHeight === figma.mixed ? 'mixed' : await getValueOrToken('lineHeight', lineHeight);
             console.log('[getNodeStyles] Text properties processed for:', n.name);
         }
         // Export layout properties
@@ -527,9 +549,27 @@ async function ExportElementStyles(node) {
         console.log('[getNodeStyles] Processing size properties for:', n.name);
         nodeStyles.width = await getValueOrToken('width', n.width);
         nodeStyles.height = await getValueOrToken('height', n.height);
-        // Export corner radius
+        // Export corner radius - can be mixed when corners have different values
         if ('cornerRadius' in n) {
-            nodeStyles.cornerRadius = await getValueOrToken('cornerRadius', n.cornerRadius);
+            const cornerRadius = n.cornerRadius;
+            if (cornerRadius === figma.mixed) {
+                // If mixed, try to get individual corner values (available on RectangleCornerMixin)
+                if ('topLeftRadius' in n) {
+                    const rectNode = n;
+                    nodeStyles.cornerRadius = {
+                        topLeft: rectNode.topLeftRadius,
+                        topRight: rectNode.topRightRadius,
+                        bottomLeft: rectNode.bottomLeftRadius,
+                        bottomRight: rectNode.bottomRightRadius
+                    };
+                }
+                else {
+                    nodeStyles.cornerRadius = 'mixed';
+                }
+            }
+            else {
+                nodeStyles.cornerRadius = await getValueOrToken('cornerRadius', cornerRadius);
+            }
         }
         console.log('[getNodeStyles] Completed for:', n.name);
         return nodeStyles;
@@ -1015,14 +1055,45 @@ async function ExportMultipleComponents(componentIds, options) {
     }
 }
 /**
+ * Recursively sanitize an object to remove Symbols (like figma.mixed)
+ * which cannot be serialized through postMessage
+ */
+function sanitizeForPostMessage(obj) {
+    if (obj === null || obj === undefined) {
+        return obj;
+    }
+    // Check if it's a Symbol (like figma.mixed)
+    if (typeof obj === 'symbol') {
+        return 'mixed';
+    }
+    // Handle arrays
+    if (Array.isArray(obj)) {
+        return obj.map(item => sanitizeForPostMessage(item));
+    }
+    // Handle objects
+    if (typeof obj === 'object') {
+        const sanitized = {};
+        for (const key in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                sanitized[key] = sanitizeForPostMessage(obj[key]);
+            }
+        }
+        return sanitized;
+    }
+    // Primitive values (string, number, boolean) are safe
+    return obj;
+}
+/**
  * Send success message with JSON result to the UI
  */
 function sendSuccess(result) {
     console.log('[sendSuccess] Sending success message to UI');
-    console.log('[sendSuccess] Data keys:', Object.keys(result));
+    console.log('[sendSuccess] Data keys:', typeof result === 'object' && result !== null ? Object.keys(result) : 'N/A');
+    // Sanitize the result to remove any Symbols before sending
+    const sanitizedResult = sanitizeForPostMessage(result);
     figma.ui.postMessage({
         type: 'Exportion-result',
-        data: result
+        data: sanitizedResult
     });
     console.log('[sendSuccess] Message sent');
 }
